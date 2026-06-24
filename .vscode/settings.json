@@ -1,0 +1,9 @@
+{
+    "git.autoRepositoryDetection": false,
+    "git.repositoryScanMaxDepth": 1,
+    "files.watcherExclude": {
+        "**/node_modules/**": true,
+        "**/dist/**": true,
+        "**/.git/objects/**": true
+    }
+}

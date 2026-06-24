@@ -1,0 +1,144 @@
+services:
+  # ---- PostgreSQL（含 pg_bigm 中文全文检索扩展）----
+  postgres:
+    image: cybersparker-deploy-postgres:latest
+    build:
+      context: ./deploy/postgres
+      args:
+        - HTTP_PROXY=http://192.168.137.120:7890
+        - HTTPS_PROXY=http://192.168.137.120:7890
+    environment:
+      POSTGRES_DB: cybersparker
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-nihao888}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+
+  # ---- Redis ----
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---- Django Web (gunicorn) ----
+  web:
+    image: cybersparker-deploy-web:latest
+    build: 
+      args:
+        - HTTP_PROXY=http://192.168.137.120:7890
+        - HTTPS_PROXY=http://192.168.137.120:7890
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      DJANGO_DEBUG: "False"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_PASSWORD: ${DB_PASSWORD:-nihao888}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ./static:/app/static
+      - ./EXP_input:/app/EXP_input
+      - ./EXP_plugin:/app/EXP_plugin
+      - ./upload_files:/app/upload_files
+      - ./AI_PoC:/app/AI_PoC
+      - ./db:/app/db
+      - ./error_log:/app/error_log
+      - ./result_spool:/app/result_spool
+      - ./shuffle_files:/app/shuffle_files
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 1048576
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/static/.populated"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # ---- Celery Worker + Beat ----
+  worker:
+    image: cybersparker-deploy-worker:latest
+    build: 
+      args:
+        - HTTP_PROXY=http://192.168.137.120:7890
+        - HTTPS_PROXY=http://192.168.137.120:7890
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c 'mkdir -p /app/error_log/celery && CELERY_LOG_DIR=/app/error_log/celery sh /app/start_celery.sh'
+    environment:
+      TZ: Asia/Shanghai
+      DJANGO_DEBUG: "False"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_PASSWORD: ${DB_PASSWORD:-nihao888}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    volumes:
+      - ./EXP_input:/app/EXP_input
+      - ./EXP_plugin:/app/EXP_plugin
+      - ./upload_files:/app/upload_files
+      - ./AI_PoC:/app/AI_PoC
+      - ./db:/app/db
+      - ./error_log:/app/error_log
+      - ./result_spool:/app/result_spool
+      - ./shuffle_files:/app/shuffle_files
+      - ./static:/app/static
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 1048576
+
+  # ---- Nginx（React 壳页 + API 反代） ----
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - ./static:/usr/share/nginx/html:ro
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "0.0.0.0:28600:80"
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 1048576
+
+
+volumes:
+  postgres_data:
+  redis_data:

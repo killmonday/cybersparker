@@ -1,0 +1,584 @@
+## 2026-06-24
+- **前端复制功能 HTTP 环境兼容修复**：新建 `frontend/src/utils.ts` 共享 `copyToClipboard()` 函数，优先用 Clipboard API，失败时降级到 `execCommand('copy')`（兼容 HTTP 部署场景）。修复资产检索页复制 URL、插件详情页复制代码、文件托管页复制链接、PoC 生成页复制提示词 4 处在非 HTTPS 环境下静默失败的问题。
+- **SQL 性能反模式批量修复**：加 3 个高频过滤字段索引（auto_scan_tasks.status、batch_EXPTask.status、EXPTask_result.task_id）；dirscan_worker phase3 把 N 条 SELECT 合并为 1 条；fscanx 删除任务改为批量 EXISTS + 批量删孤立资产；5 个批量删除接口从逐条 id=uid.delete() 改为 id__in=uids.delete()，2 个插件批量删除先预取 poc 路径再批量删+清文件；fscanx 任务列表 2 个 COUNT 从逐行查改为批量 GROUP BY；plugin_manage 旧 Django 列表页补 prefetch_related('tags')。
+- **zones API `?counts=1` 性能优化**：`zone_list_api` 把 5 个 `COUNT(DISTINCT ...)` 注解（一条 SQL 中 JOIN 五个大表，中间结果集组合爆炸）改为 5 条独立的 `GROUP BY zone_id` 查询，Python 中合并。修复 5000 资产时接口响应 16 秒的问题。
+- **侧边栏折叠按钮遮挡底部菜单修复**：`SidebarLayout.tsx` Menu 底部加 48px 内边距，为 antd Sider 的折叠按钮预留空间，修复页面放大时"系统配置"菜单项被按钮遮住无法点击的问题。
+
+## 2026-06-23
+- **批量任务漏洞结果超时刷新**：`batch_task_executor.py` 的 `save_TaskResult()` 增加超时提交机制——缓存中有漏洞记录但不足 100 条时，若距上次提交已过 60 秒则自动提交，不再等到任务结束才能看到结果。避免漏洞数量少时用户长时间看不到任何进展。
+- **插件调试页插件列表懒加载**：`GET /api/v1/exp-debug/plugins` 改为支持 `?q=` 搜索参数（按 title/CVE 模糊匹配，最多 50 条）；前端插件 Select 改为输入关键词后服务端搜索（300ms 防抖），不再页面打开时全量加载所有插件。修复生产环境插件数量多时接口响应慢的问题。
+- **Nginx 部署 CSRF 修复**：`deploy/nginx/default.conf` 中所有 `proxy_set_header Host $host` 改为 `$http_host`（保留客户端端口号），修复 Docker 端口映射为非 80 时（如 28600）Django CSRF Origin 端口校验失败导致登录表单提交 403 的问题。同时补充 `/login`、`/logout`、`/runtime/`、`/files/` 缺失的 `X-Forwarded-For` / `X-Forwarded-Proto` 请求头，server 层新增 `client_max_body_size 100m`。
+- **种子数据导出头部污染修复**：修复 `deploy/seed/export_seed_data.sh` 的 heredoc 头部生成逻辑，避免把 `date '+%Y-%m-%d %H:%M:%S' >> “${OUTPUT}”` 和 `cat >> ... << 'HEADER'` 这类 shell 命令文本写进 `seed_data.sql`。同时修正仓库内 `deploy/seed/seed_data.sql` 现有污染头部，并新增 `SeedExportScriptTests` 覆盖”导出文件头只能是 SQL 注释”和”仓库内 seed_data.sql 头部无 shell 命令”两个场景，防止生产 fresh deploy 在自动导入种子数据时再次卡在 `syntax error at or near “date”`。
+
+## 2026-06-22
+- **参考数据 ID 重整脚本**：`deploy/seed/reset_ids.sql` — 将指纹/PoC/标签等 9 张参考表 ID 重整为 1..N，消除多次清空重导导致的 ID 膨胀（exp 从 62917→11113，fingerprint 从 133283→34017）。同时重新导出 `seed_data.sql`，新部署直接获得干净 ID。
+- **static 历史残留清理**：删除 `app_cybersparker/static/exports/`（146 个废弃 CSV）、`static/project2/`（628 个旧 Bootstrap/jQuery 前端文件）、`app_cybersparker/static/project2/`（废弃 JS + 误放的 .omc）。flag.css 移到 `app_cybersparker/static/css/`，前端引用路径同步更新。删除 2 个测试旧 jQuery 代码的废弃测试。
+- **种子数据导入判断修复**：`docker-entrypoint.sh` 的 `psql -t` 输出带前导空格（对齐格式），字符串精确匹配 `"0"` 失败，误判为"已有数据"跳过导入。改为 `-tA`（unaligned）输出纯数字 + `-eq` 整数比较。同时 `2>/dev/null` 改为 `2>&1`，导入错误不再静默丢弃。
+- **裸域名 URL 解析误判修复**：`auto_exp_task.py` 的 `request_scan` 方法中，URL 协议判断从 `urlparse().scheme` 改为检查原始字符串中的 `://`。`fingerPrint_debug.py` 的 `mate()` 入口对裸域名自动补 `http://`。修复前 `urlparse("host:port")` 会把 host 错解析为 scheme，导致系统误判为非 HTTP 协议直接跳过扫描。修复后裸域名正确尝试 http/https。新增 3 个测试，全量 446 tests 0 fail。
+- **README 入口文档重写**：参考 `refer.md` 重新组织根目录 README，补齐引言痛点、平台价值、适用场景、功能模块概览，并突出三条任务主链路、结果沉淀、扫描区域隔离、AI 生成 PoC、前后端分离；新增 Mermaid 功能模块图 / 三条任务主链路图 / 运行架构图，并在总览、核心页面、部署入口等位置预留截图占位；同时补齐 `docs/设计总览.md` 的 `poc_generation` 队列口径，避免入口说明与架构文档冲突。
+
+## 2026-06-21
+- **Docker 部署审计与修复**：新建 `.dockerignore`（排除 node_modules/pgdata/.git 等，避免 COPY . . 构建膨胀和 node_modules 版本覆盖）；`docker-compose.yml` web 服务加 healthcheck（检测 `/app/static/.populated`），nginx 的 `depends_on` 改为 `condition: service_healthy`（消除首次启动时静态文件未就绪导致的 404 窗口）；确认 DJANGO_DEBUG 在 docker-compose 中已设为 `"False"`。
+- **PostgreSQL 数据目录统一到 `./pgdata`**：开发环境 PG 数据目录从 Debian 默认路径 `/var/lib/postgresql/17/main` 迁移到项目目录 `./pgdata`，与生产环境 Docker `docker-compose.yml` 的挂载路径对齐。`deploy/setup-env.sh` 新增自动迁移逻辑：首次运行自动将数据迁到 `./pgdata` 并更新 `postgresql.conf` 的 `data_directory`。
+- **backlog 验收状态全量同步**：逐条代码审查后，25 个标记为 未验收/待验收 的 backlog item 全部确认为 已验收（代码实现完整、测试通过），底层 6 个 backlog 文件验收字段同步更新。
+- **`/api/v1/zones` 性能优化**：去掉默认的 5 个 `COUNT(DISTINCT)` 注解（在数千行的大表上做聚合耗时约 1s），改为按需 `?counts=1` 时才查。资产检索/任务列表等 4 个页面只需要 id+name 做下拉，不再触发昂贵的计数查询。仅 ZoneListPage 传 `?counts=1` 获取计数。全量 444 tests 0 fail。
+- **`/api/v1/zones` 性能优化**：去掉默认的 5 个 `COUNT(DISTINCT)` 注解（在数千行的大表上做聚合耗时约 1s），改为按需 `?counts=1` 时才查。资产检索/任务列表等 4 个页面只需要 id+name 做下拉，不再触发昂贵的计数查询。仅 ZoneListPage 传 `?counts=1` 获取计数。全量 444 tests 0 fail。
+- **Google Fonts (DM Sans + Spectral) 去 CDN 化**：`@fontsource/dm-sans` + `@fontsource/spectral` npm 本地依赖代替 `fonts.googleapis.com` 外部请求，12 个 woff2/woff 字体文件由 Vite 打包到 `/react-shell/assets/`。
+- **Font Awesome 去 CDN 化**：`font-awesome@4.7.0` 改为 npm 本地依赖 + CSS import，字体文件（woff2/woff/ttf/svg/eot）由 Vite 打包到 `/react-shell/assets/`，消除对 cdnjs.cloudflare.com 的外部请求（原请求延迟约 6 秒）。
+- **导出/快导缺少 zone 过滤修复**：快导 URL 和后端下载接口完全缺 `zone_id` 参数，导出接口 `asset_export` 收到 `__intranet__` 后 `int()` 抛 ValueError 被静默丢弃，`run_export_task` 只认整数 zone_id。修复：快导前后端都加 zone 过滤（含 `__intranet__` sentinel）；导出接口 `__intranet__` 转为 `zone_id=-1` sentinel 存入 ExportTask，`run_export_task` 识别 `-1` → `exclude(zone__code='public')`。全量 444 tests 0 fail。：右侧"匹配 xx 条"旁边加"说明"按钮，点击弹出 Modal，列出全部 24 个检索字段及示例、检索语法（AND/OR/深度检索/通配符/查空/排除）、左侧聚类统计用法、导出/快导、其他功能（区域切换/卡片展开/展开全部/URL 分享等）。
+- **搜索框 placeholder 补全全部检索字段**：从 6 个字段扩展到 24 个。
+- **时间写入时区统一修复**：`batch_exp_task.py` 的 `startTask`/`add`/`edit` 三处用 `datetime.now()`（naive本地时间）`.replace(tzinfo=utc)` 构造时间，系统时区为 Asia/Shanghai 时 startTime 会比实际 UTC 早 8 小时，导致 endTime < startTime。统一改为 `datetime.now(timezone.utc)`。`poc_gen_task.py` 的 `update_time`、`expResult.py` 两处 `datetime.now()`、`exp_debug.py` 默认日期、`nuclei_runtime_engine.py` 模板引擎 date_time 函数同步修正。全量 444 测试 0 失败。
+- **资产检索页 zone 筛选框新增"所有内网"选项**：前端 Select 和 `global_asset_search`/`global_facet` 后端识别 `zone_id=__intranet__` sentinel，转为 `exclude(zone__code='public')`，方便用户一键查看所有内网资产。新增 3 个测试，全量 443 tests 0 fail。
+- **任务内结果页 __intranet__ 过滤失效修复**：`Task_result` 和 `facet`（任务内结果页+统计）没有处理 `__intranet__` sentinel，`int('__intranet__')` 抛 ValueError 后静默回退为任务自身 zone（通常公网 id=1），导致用户选"所有内网"却看到公网资产。修复：两处 zone 解析逻辑补齐 `__intranet__` → `exclude(zone__code='public')` 分支。全量 444 测试 0 失败。
+- **SSL 兼容性修复：允许旧式重新协商**：新增 `add_ssl_legacy_renegotiation.py` monkey-patch，全局给 `ssl.create_default_context`、`ssl._create_default_https_context`、`urllib3 create_urllib3_context` 追加 `OP_LEGACY_SERVER_CONNECT`(0x4) + `OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION`(0x40000)。`auto_exp_task.py` 和 `dirscan_worker.py` 的 aiohttp connector 改用 `_create_permissive_ssl_context()` 并移除 per-request `ssl=False`。`fingerPrint_debug.py` 的 httpx `verify=False` 改为传自定义 SSL context。覆盖所有 HTTP 请求路径（requests/nuclei/httpx/aiohttp/ssl 直连）。新增 1 个测试 + 14 个隔离探测，全量 444 tests 0 fail。
+- **目录扫描源头过滤非 HTTP 协议 + 进度修正**：`_resolve_input_sources` 三个分支加 `protocol__in=("http", "https")`，非 Web 资产不入 shuffle 文件，progress_total 从源头正确。worker 层跳过逻辑改为计入全部剩余路径数+cleanup_host。count 校验同步加协议过滤。
+- **目录扫描 zone 传递修复 + phase2 卡住修复**：`_sync_fingerprint_and_write` 的 `update_or_create` 缺 zone_id（unique_together 的组成部分），新记录 zone_id=NULL→兜底公网，且不同 zone 的同一协议+主机+端口+路径互相覆盖。修复：zone_id 从 task 逐层传递到 `_sync_fingerprint_and_write`，加入查找键和 defaults。`_run_dir_scan_phase2` producer 正常结束时不设 exit_flag，result_writer 循环退不出→t.join() 永远卡住。修复：producer 无更多结果时 set exit_flag。
+- **目录扫描跳过非 HTTP 协议资产**：`dirscan_worker.py` 扫描循环中，对 protocol 不是 http/https 的资产直接跳过（计入进度），避免 aiohttp 对非 HTTP URL 报错。新增 1 个协议过滤测试，全量 440 tests 0 fail。
+- **目录扫描任务 zone 过滤缺失修复**：`_resolve_input_sources()` 查询资产时未按 zone 过滤，导致任务进度计数跨区域——zone="内网1"只有 19 条记录，但 `progress_total` 算了全部区域的 1671 条。修复：函数加 `zone_id` 参数，三个查询分支（全选/检索语句/手动选任务）均加 zone 过滤，三个调用位置传 zone_id。新增 1 个 zone 过滤验证测试，全量 439 tests 0 fail。
+- **自动扫描任务 zone 字段保存不生效修复**：前端表单发送 `zone_id`（AssetZone 主键），但 Django ModelForm 字段名是 `zone`（ForeignKey 字段名），导致表单处理时 `zone` 取不到值被设为 `None`，然后模型 `save()` 兜底逻辑静默改为公网（id=1），用户选的区域被丢弃。修复：`add()` 和 `edit()` 视图在创建 ModelForm 前，将 POST 中的 `zone_id` 映射到 `zone`。新增 4 个测试（自定义zone创建/引擎强制公网/编辑改zone/详情API包含zone_id），全量 438 测试 0 失败。
+- **阶段二十 zone 全链路加固**：验收未通过的 11 条缺口全部修复——① 5 张表 zone FK NOT NULL（migration 0079）；② writer 缺 zone_id 时兜底公网 + error log；③ input_type=6 检索语句导入加 zone 过滤；④ ip_detail_api/port_overview_more 加 zone 过滤；⑤ dedup_by_ip_port 改为 (zone, ip, port) 分组；⑥ iter_search_query_targets 加 zone_id 参数；⑦ post_migrate 信号确保 TransactionTestCase truncate 后系统 zone 仍存在；⑧ 所有 model save() 兜底改为 `self.zone_id = 1` 避免线程上下文中查询 AssetZone 表；⑨ 13 条 null zone 测试遗留数据已清理。全量 434 测试 0 失败。
+- **索引清理**：删除 2 个冗余索引——`idx_html_trgm`（被 `idx_html_upper_trgm` 替代，回收 73MB）、`idx_task_asset`（unique_together 已建同字段 B-tree，回收 232kB）。全量 434 测试 0 失败。
+- **HTML 检索语义分流（tsvector 快捷检索）**：实现 BL-AUTO-015 设计但未落地的 tsvector 路径——`html:nginx`（`:` / `=`）走 `to_tsvector @@ plainto_tsquery` 词条匹配，`html:="<a>"`（`:=`）保留 `LIKE %子串%` 深度检索。`idx_html_tsvector` 索引从死索引变为在用。新增 4 个 HtmlSearchSemanticSplitTests。
+- **单任务资产检索 zone 过滤 + 可切换**：`Task_result` 和 `facet` 默认按任务所属 zone 过滤，同时支持用户显式传 `zone_id` 覆盖（可切换到其他区域查看资产）。前端 `GlobalAssetSearchPage` 在任务上下文（taskId 存在）时自动获取任务 zone 做默认值，用户可通过下拉框切换。
+- **编辑任务时扫描区域回显修复**：修复两个关联问题——① 三个任务详情 API（auto_scan_task / batch_exp_task / dirscan）不返回 `zone_id`，导致编辑时下拉框为空；② zones 列表懒加载，编辑表单打开时 Select 找不到匹配选项，显示原始 id（"1"）而非名称（"公网"）。修复：API 补 `zone_id`，表单弹窗打开时预加载 zones。
+- **模型 save() zone=NULL→公网兜底**：`auto_scan_tasks`、`batch_EXPTask`、`DirScanTask` 三个模型的 `save()` 新增 zone_id 为空时自动设为公网。`auto_scan_indentify_result` 不能加（会破坏 writer 的 zone_id 匹配逻辑），其 zone 必须从 event payload 传入。数据库 5745 条 NULL zone 已 UPDATE 为公网。
+- **开发环境 favicon 404 修复**：`STATICFILES_DIRS` 在 DEBUG=True 时自动包含 `STATIC_ROOT`，让 runserver 能提供运行时爬取的 favicon 文件。生产模式（DEBUG=False）保持为空，collectstatic 和 nginx 不受影响。
+- **扫描区域表单修复 + 默认公网**：修复三个 ModelForm（auto_scan_task / batch_exp_task / dirscan）`Meta.fields` 缺少 `zone` 的问题——用户在前端选了区域提交后被静默丢弃。`auto_scan_tasks.save()` 新增 zone=None→公网兜底。前端三个任务页在 zones 加载后自动选中"公网"默认值。新增 5 个 ModelFormZoneFieldTests。
+- **从旧备份 db.SQL 恢复指纹/POC/关系数据**：数据库数据丢失后用 pg_dump 备份文件恢复 5 张表——fingerPrint（34,026条）、EXP（11,110条）、exp_relate_fingerprint（28,246条）、Tag（8,200条）、exp_tags（62,369条）。新旧 schema 差异（condition/title unique、unique_together）自动处理，0 约束冲突。新增 `import_from_backup` 管理命令（`python manage.py import_from_backup --input db.SQL`）。
+
+## 2026-06-20
+- **BL-ZONE-001 模型与迁移实现**：新增 `AssetZone` 模型（code/name/is_system）和 `AssetRootBinding` 模型（zone+protocol+host+port → identify_result）；`auto_scan_indentify_result` / `auto_scan_tasks` / `batch_EXPTask` / `DirScanTask` / `auto_scan_directory_result` 五张表新增 `zone` FK；两张资产表唯一键改为 zone 维度；数据迁移插入系统区域 `public`（公网）并回填全部历史数据；`auto_scan_directory_result` 新增 `root_identify_result` FK。新增 zone CRUD API（`/api/v1/zones` 列表/新增/改名/删除，五重引用检查）和 28 个测试。zone FK 暂 nullable（NOT NULL 推迟至 BL-ZONE-003）。同步更新 `docs/backlog/13-扫描区域与资产域.md`、`docs/项目控制台.md`。
+- **BL-ZONE-003 写入路径改造实现**：`build_identify_event_payloads` 新增 `zone_id` 参数并写入 event payload；`_write_identify_event` 的 `match_keys` 加 `zone_id`；`_resolve_identify_result_id` 加 `zone_id` 参数、移除 `@lru_cache`；`save_indentify_to_db` 传递 `self.zone_id`；`auto_scan_task.startTask` 传递 `zone_id` 到 handler；`fscanx_parser._save_asset` filter/create 加 zone；`auto_scan_tasks.save()` 和 `batch_EXPTask.save()` 对 input_type=4/5 强制 zone=public；同步修复 2 个旧测试适配新唯一键。新增 8 个测试。
+- **文档口径去陈旧化：单任务降为遗留兼容链路**：统一修正文档中把单任务当当前主能力的表述。当前主流程明确为批量任务 / 自动识别 / 目录扫描；`EXPTask` 单任务仅保留兼容，不再继续扩展。同步更新 `docs/modules/00-模块总览.md`、`docs/modules/02-任务执行模块.md`、`docs/modules/04-结果管理模块.md`、`docs/modules/06-运行部署与可观测性模块.md`、`docs/当前实现总览.md`、`docs/项目启动文档.md`、`docs/阶段交付范围说明.md`、`docs/项目控制台.md`、`docs/设计总览.md`、`docs/开发文档索引.md`、`docs/modules/资产检索与目录扫描设计.md`。
+
+## 2026-06-19
+- **Docker Compose 生产部署方案**：重写 Dockerfile（Python 3.11-slim、gunicorn、前端构建集成）、docker-compose.yml（6 服务：postgres/redis/web/worker/nginx + beat）、ulimits nofile=65535:1048576、数据目录挂载（EXP_input/EXP_plugin/upload_files/db/AI_PoC）、Nginx 反代 + React 壳页直出、备份脚本 deploy/backup.sh（pg_dump + tar）、恢复脚本 deploy/restore.sh（解压 + 导入 + migrate）。改动：Dockerfile（重写）、docker-compose.yml（重写）、deploy/docker-entrypoint.sh（新建）、deploy/nginx/default.conf（新建）、deploy/backup.sh（新建）、deploy/restore.sh（新建）、requirements.txt（+gunicorn）、.gitignore（+pgdata/ backups/ redis_data/）、docs/项目启动文档.md、docs/设计总览.md
+- **代码与文档同步审查 + 阶段验收**：审计全项目文档与代码一致性，修复 9 处文档滞后/计数过时（模块文档状态、验证证据摘要、路由总览表、设计总览模块地图、URL计数、页面数字统一、文件托管状态行、BL-AUTO-019 去重）；修复 hosted_file_rename_api/note_api 缺 HTTP 方法强制装饰器；补 48 个专项测试覆盖文件管理（22）+ AI PoC（23）+ 目录扫描阻断响应（3）；全部 13 项未验收 backlog 已验收通过。改动：docs/项目控制台.md、docs/设计总览.md、docs/modules/11-文件托管模块.md、docs/modules/12-用户管理模块.md、docs/当前实现总览.md、docs/backlog/09-文件管理.md、docs/backlog/10-AI生成PoC.md、docs/backlog/11-文件托管.md、CHANGELOG.md、hosted_file_manage.py（+2行 @require_http_methods）、tests.py（+48 测试）
+- **新增用户管理功能（BL-USER-001~004）**：多角色账户体系——超级管理员（管所有人+所有功能）、普通管理员（管所有功能+只管普通用户）、普通用户（只读，不能看插件/指纹内容）。Django auth.User + UserProfile（OneToOne），初始化 admin/admin 超级管理员。login.py 改用 authenticate()，session["info"] 升级含 role 字段。用户管理 API（/api/v1/users）含严格角色边界校验（admin 不能删/改其他 admin）+ 角色变更/删除时 session 失效。permissions.py（deny_user 装饰器）+ 28 个 views 文件约 115 个写端点加权限。前端 AuthContext.tsx（全新）+ 各页面按钮按角色条件渲染 + UserManagementPage.tsx。改动：models.py（+20行）、apps.py（+11行）、permissions.py（新建 22行）、login.py（重写）、user_manage.py（新建 163行）、urls.py（+8行）、migrations/0073（新建）、AuthContext.tsx（新建 50行）、UserManagementPage.tsx（新建 228行）、App.tsx（+3行）、SidebarLayout.tsx（+3行）、各页面（+48行 角色条件渲染）、tests.py（+183行 21新测试 + 批量 session 格式更新）
+- **安全修复：全局开启 CSRF 校验**：删除全部 25 个视图文件的 137 处 `@csrf_exempt`，Django `CsrfViewMiddleware` 对所有 POST/PUT/DELETE API 端点生效。前端已正确发送 `X-CSRFToken` 头（client.ts），无需改动。改动：25 个视图文件（删 137 行 @csrf_exempt + 25 行 import）、login.py（logout 加 @require_POST，删除 @csrf_exempt）、SidebarLayout.tsx（退出改为 POST /logout）
+- **清除 BasicAuthMiddleware 死代码**：basic.py 的 HTTP Basic Auth 中间件因 AuthMiddleware 在前置已拦截全部无 session 请求，属不可达死代码。硬编码凭据 `admin:admin` 从未暴露。改动：删除 basic.py、settings.py 去注册、tests.py 删 2 个测试
+- **新增文件托管页面（BL-HOST-001）**：独立于现有"文件管理"的通用文件托管服务。上传任意类型文件（≤200MB），可设置公开/需登录鉴权；支持重命名/删除/修改访问级别/备注（弹窗编辑最多500字，表格列展示）。下载链接 `/files/<id>/<原始文件名>`，前端有"复制链接"按钮。模型 HostedFile + note 字段（migration 0071-0072）。改动：models.py（+17行 + 2 migrations）、hosted_file_manage.py（新建 200行）、urls.py（+10行）、auth.py（+4行）、tests.py（+312行 19新测试）、HostedFileListPage.tsx（新建 315行）、App.tsx（+2行）、SidebarLayout.tsx（+3行）、client.ts（+7行 put）、api/index.ts（+1行）
+- **安全修复：文件下载增加文件名校验防 ID 枚举**：下载视图在按 ID 查到记录后，额外校验 URL 中的文件名与 `record.original_name` 是否一致，不一致返回 404。防止攻击者遍历 ID 批量抓取所有公开文件。改动：hosted_file_manage.py（+3行）、tests.py（+8行，1 新测试）
+- **安全修复：Content-Disposition 头注入 + 大文件 OOM + null 字节 + 文件名长度**：① 下载响应头剔除 origin_name 中的 `\r\n"` 防注入 + 改用 FileResponse 流式传输避免全量读入内存；② 重名校验拒绝 `\x00` null 字节；③ 上传时 original_name 截断到 256 字符。改动：hosted_file_manage.py（+11行/-4行）、tests.py（+68行，4 新测试）、全量 305 OK
+- **修复 facet 统计"(空)"口径不一致**：facet 通用分支原来把 NULL 过滤掉，"(空)"只统计空字符串；但搜索 `!field:"*"` 和 `field:"(空)"` 匹配的是 NULL + 空字符串。修复后 NULL 和空字符串合并为同一个"(空)" facet 项，三方口径一致。改动：auto_scan_result.py（+8行/-6行）、asset_search_parser.py（+2行）、GlobalAssetSearchPage.tsx（+3行/-2行）、tests.py（+72行，2 新测试）
+- **资产检索页左侧统计新增 ICP 备案号和版权信息维度**：`FACET_ALLOWED_FIELDS` 加 `icp`/`copyright`，前端 `FACET_LABELS` + `ALL_FACET_FIELDS` 同步。两个字段走 `build_facet_result` 通用 `GROUP BY` 聚合分支，无需模型变更。改动：auto_scan_result.py（+1行）、GlobalAssetSearchPage.tsx（+2行/-2行）、tests.py（+48行，2 新测试）
+- **修复编辑 fscanx 自动扫描任务不传新文件时报"请上传 fscanx 输出文件"**：`resolve_target_source` 的 `input_type=2` 分支缺少对编辑已有任务的判断——新建任务和从其他类型切换仍需上传文件，但编辑已使用 fscanx 输入源的任务时不传新文件应复用已有文件。改动：auto_scan_task.py（+4行/-2行）、tests.py（+68行，3个新测试）
+- **证书字段索引改用 GIN trigram**：cert_org / cert_org_unit / cert_common_name 从 B-tree（或无索引）改为 `USING GIN (UPPER(field) gin_trgm_ops)`，加速中英文混合 icontains 搜索。改动：0070 migration（新建）
+- **fscanx 导入提取 copyright/icp 字段到资产结果表**：`_parse_product()` 从 `[copyright:...]` `[ICP:...]` 提取版权和 ICP 备案号，存入 `auto_scan_indentify_result` 新增字段（截断 copyright≤512、icp≤128）。新建 B-tree 索引加速全局检索。`asset_search_parser` 支持 `copyright`/`icp` 条件搜索和 `field:"*"` 通配符。改动：models.py（+3行）、fscanx_parser.py（+6行/-2行）、asset_search_parser.py（+2行/-2行）、0067-0069 migration（3个，B-tree→GIN trigram）
+- **根治 fscanx 解析器弱口令协议覆盖 + Redis 弱口令/未授权导入**：`_parse_other_weak()` 改用 `_RE_GENERIC_WEAK`（`\w+` 任意协议）替代 `_RE_OTHER_WEAK`（白名单 8 种），调度器与处理器正则一致，RDP/Telnet/VNC 等不再静默丢弃。新增 `_parse_redis()` 按 fscanx 实际输出格式（`[+] Redis IP:PORT password [file:...]`）处理 Redis 弱口令和未授权访问。`RESULT_TYPE_CHOICES` 新增 `(10, "未授权访问")`。改动：models.py（+1行）、fscanx_parser.py（+17行/-6行）
+- **fscanx 导入提取证书字段到资产结果表**：`_parse_product()` 从 `[Cert:...]` 中解析 Subject 的 CN/O/OU，写入 `auto_scan_indentify_result` 的 `cert_common_name`/`cert_org`/`cert_org_unit` 字段，不再仅作为产品名展示。仅解析 Subject 部分（Issuer 的 O/OU 属于 CA 信息不入库）。改动：fscanx_parser.py（+30行/-1行）
+- **修复全局资产搜索 vuln/cve 条件命中资产后漏洞卡片不显示**：commit b6afd28 将搜索路径 task_type 放宽到 IN (1,2,3) 支持三种任务，但 5 处查询漏改，仍用 task_type=1。批量任务（task_type=3）的漏洞结果搜索能命中但卡片不渲染。全部统一改为 task_type__in=[1, 2, 3]。改动：auto_scan_result.py（3行）、tasks.py（1行）、batch_exp_task.py（2行）
+- **插件调试/漏洞利用页增加 HTTP 超时控制**：api_exp_execute 读取 http_timeout 参数写入 conf.timeout（默认 10s），finally 块恢复原值。前端 ExpDebugPage + VulnExploitPage 增加超时输入框（默认 10s）。改动：exp_debug.py（+5行）、ExpDebugPage.tsx（+3行）、VulnExploitPage.tsx（+10行）
+- **资产检索漏洞资产快捷利用（BL-VULN-EXPLOIT）**：资产检索页"受影响漏洞"卡片新增"利用"按钮，点击新标签页打开漏洞利用页，预填目标URL和当前插件，可选择操作类型/代理/命令参数/task_args，点击执行显示结果。后端复用 exp-debug/info + execute API。`_build_related_vulns_from_rows` 新增 exp_id 字段。改动：auto_scan_result.py（+1行）、VulnExploitPage.tsx（新建 130行）、GlobalAssetSearchPage.tsx（+9行）、App.tsx（+9行）、result.ts（+2行）
+
+## 2026-06-18
+- **测绘引擎新增自动填入默认API地址 + 邮箱字段按引擎类型显隐**：后端 ENGINE_DEFAULTS 硬编码 5 家引擎的默认 api_base_url 和是否需要邮箱。前端新增引擎时选类型自动填 API 地址，zoomeye/hunter 隐藏邮箱输入框。改动：cyberspace_engine_setting.py（+15行）、engine.ts（+6行）、EngineListPage.tsx（+16行）
+- **测绘引擎非HTTP协议资产导入（BL-AUTO-020）**：自动扫描任务从 Fofa/ZoomEye/Quake 查询时，非 HTTP 协议目标（SSH/FTP/RDP/SMB/Telnet/MySQL/MSSQL/Redis/MongoDB/PostgreSQL/Oracle）直接入库，不再发起无意义的 HTTP 请求。`request_scan` 对非 http/https scheme 跳过 aiohttp GET → `save_indentify_to_db` 扩展 11 种协议默认端口映射。改动：auto_exp_task.py（+16行）、tests.py（+47行）
+- **修复 19 个预存测试失败**：6 类根因——① `conflict_strategy`/`http_timeout` 模型字段缺 `blank=True` 导致表单验证拒绝（10 个）；② `input_type_choices` 枚举数过期（1 个）；③ `iter(set(), sentinel)` 括号错误→TypeError（1 个）；④ `batch_exp_task.py` 误用 `datetime.timezone.now()` 和 `timezone.timedelta` → AttributeError（1 个）；⑤ `exp_debug.py` 两处 hardcode `status=True` 不反映 `matched=False`（1 个）；⑥ `task_args`/`candidate_url`/OOB 缓存/双流写入引起的测试夹具过期（5 个）。改动：models.py（+4行 blank=True）、batch_exp_task.py（import+2处修复）、auto_exp_task.py（iter 括号修正）、nuclei_runtime_engine.py（network 模板不清 OOB 缓存）、exp_debug.py（2处 status 修正）、tests.py（8 处更新）
+- **修复 fscanx skip 策略漏建 AssetTaskRelation**：导入冲突策略为"跳过"且资产已存在时，`_save_asset` 提前 `return` 跳过了后续的 AssetTaskRelation 创建，导致已被其他任务扫过的资产在新任务结果页不可见。改为 skip 只跳过字段更新，AssetTaskRelation 始终创建。改动：fscanx_parser.py（-2行/+1行）、tests.py（+4行）
+- **新增 fscanx 输出文件导入功能（BL-AUTO-019）**：自动扫描任务新增 input_type=2（fscanx输出文件），用户上传 fscanx 扫描结果 txt → 后台线程解析 Port open / Product / OsInfo / 弱口令 / FTP清单 / SMB清单 / RDP信息 / InfoScan 等数据 → 资产写入 auto_scan_indentify_result（全局检索可见），服务详情存入新表 fscanx_service_detail（独立页面展示）。支持覆盖/跳过冲突策略，停止信号和心跳僵尸回收。改动：models.py（+42行 + migration/0064）、result_event_service.py（match_keys+uri_path）、dirscan_worker.py（+uri_path__in）、dirscan_task_manage.py（+distinct()）、tasks.py（导出URL+uri_path）、fscanx_parser.py（新建 330 行）、fscanx_views.py（新建 160 行）、auto_scan_task.py（+fscanx线程分支）、urls.py（+3路由）、FscanxTaskListPage.tsx（新建）、FscanxTaskDetailPage.tsx（新建）、App.tsx/SidebarLayout.tsx（+路由+菜单）、tests.py（+19测试）
+- **漏洞利用结果页新增"清空结果"按钮（BL-FE-113）**：`/react-shell/exp-results?task_id=N` 页面在按 task_id 过滤时，操作栏显示红色"清空结果"按钮，确认后删除该任务全部漏洞利用结果。后端新增 `POST /api/v1/exp-results/clear`。改动：expResult.py（+14行）、urls.py（+1行）、ExpResultListPage.tsx（+9行）
+- **修复指纹 condition 字段 max_length=128 限制过小**：TextField 的 max_length 从 128 移除（PostgreSQL text 无上限）。实际库中已有 1539 条超限（最长 2078 字符），导入时绕过校验，编辑时 ModelForm full_clean() 触发报错。改动：models.py（-1行）+ migration/0063
+- **自动扫描漏洞结果页新增"清空结果"按钮**：`/react-shell/auto-exp-results?task_id=N` 页面同样支持按任务清空（`POST /api/v1/auto-exp-results/clear`）。改动：all_auto_exp_result.py（+14行）、urls.py（+1行）、AutoExpResultListPage.tsx（+12行）
+## 2026-06-17
+- **指纹调试页 Tabs 内"匹配结果"被挤窄修复**：antd 6.x 的 tab pane 默认 `flex: none`，宽度由内容决定而非容器。首次响应 tab 内容短时，tab pane + grid + react-section 整条链的宽度塌陷到内容最小值。修复：CSS 四条规则——Tabs `width:100%` → content-holder `flex:auto` → content `display:flex; width:100%` → tabpane-active `flex:1`（关键：让活跃 tab pane 弹性拉伸填满容器）。改动：styles.css（+4行）、FingerprintDebugPage.tsx（+1行 grid width:100% 兜底）
+- **指纹调试页"已有指纹"搜索改为远程搜索（BL-FE-112）**：原前端 `slice(0,200)` 只加载最新 200 条指纹，Select 本地 `filterOption` 搜 product 名称。14 条 "shiro" 指纹全部在 200 条之外（ID 99785~132316 vs 最新 200 条 ID 133081~133287），功能等同失效。改为 Select 远程搜索（`onSearch` → 后端 `?search=` → `product__icontains | condition__icontains`，最多 50 条），清空搜索框恢复初始列表。改动：fingerPrint_debug.py（+13行）、FingerprintDebugPage.tsx（+23行）
+- **侧边栏"资产检索"改为新标签页打开 + 自动扫描任务操作列新增"漏洞"按钮**：侧边栏菜单"资产检索"项原走 SPA 同页导航，现改用 `<a target="_blank">` 新标签页打开；Menu onClick 对 `/assets/search` 键跳过 preventDefault+navigate，让浏览器处理链接。自动扫描任务列表操作列新增"漏洞"按钮（`/react-shell/auto-exp-results?task_id=<id>`），点击新标签页查看该任务的自动扫描漏洞结果。改动：SidebarLayout.tsx（+2行）、AutoScanTaskListPage.tsx（+1行）
+## 2026-06-16
+- **自动扫描任务新增"仅漏洞扫描"模式（BL-AUTO-018）**：Vulnerability_scanning 从 是/否 改为 3选1（不扫描/Web扫描后扫描/仅漏洞扫描）。模式2跳过HTTP探测和指纹匹配，从AssetTaskRelation+auto_scan_indentify_result读已有资产product→反查exp_relate_fingerprint→线程执行POC验证。全程线程，不走asyncio。改动：models.py（choices扩展）+migration/0062、auto_exp_task.py（run()重构+_run_vuln_only_mode新增~80行+4处==1改为in(1,2)）、auto_scan_task.py（3处跳过逻辑+current_line处理）、tasks.py（模式2前检查资产+跳过engine prepare）、resource_lease_service.py（1处）、auto_scan_task_api.py（+1项）、AutoScanTaskListPage.tsx（模式2隐藏输入源）、tests.py（8条新测试, 6PASS 2SKIP）
+- **修复任务暂停卡在"暂停中"**：Django/Celery 同时重启后，僵尸回收如果因心跳窗口（30s）漏掉僵尸任务，用户点暂停会因 `owner` 非空+心跳尚新鲜被误判为 executor 存活，于是设 `pause_requested=True` 等响应，但实际已无 executor 收信号。修复：暂停 API 在 owner 为空 / 心跳过期 / 已有 pause_requested 且心跳过期时，直接落状态为已暂停，不再死等。覆盖 auto_scan_task / batch_exp_task / dirscan_task_manage 三个暂停入口。
+- **修复三任务 HTTP 超时统一以任务设置为准**：自动扫描 exp_consumer 补 conf.timeout 写入（插件内 requests 调用之前始终用默认 10s 不尊重表单项）。目录扫描新增 http_timeout 模型字段 + migration + 后端读取 + 前端表单项（之前硬编码 10s）。批量任务已正确无需改。改动：auto_exp_task.py（+2行）、models.py（+1行）、migrations/0061（新建）、dirscan_worker.py（4处）、dirscan_task_manage.py（form + detail 各 1 处）、DirscanTaskListPage.tsx（4处）。
+- **修复任务运行时 socket 连接累积导致浏览器 ERR_NO_BUFFER_SPACE（第二轮修正）**：auto_exp_task.py / dirscan_worker.py 的 aiohttp 连接器从 force_close=True 改为 keepalive_timeout=2.0 + enable_cleanup_closed=True，同一 host 的 favicon/跳转等多次请求复用连接（减少 7 倍连接数），闲置 2 秒后清理。_fetch_certificate_info 的裸 TCP 连接加 ensure_future + cancel 防超时泄漏。fingerPrint_debug.py 同模式修复。改动：auto_exp_task.py（3处）、dirscan_worker.py（2处）、fingerPrint_debug.py（1处）。
+- **任务自定义参数 task_args（BL-TASK-010）**：batch_EXPTask / auto_scan_tasks / DirScanTask 各加 task_args 字段。用户在任务表单输入 JSON 参数，执行时注入 target["task_args"]（仅 Python 插件，YAML 跳过）。数据流：DB → .values() → startTask 解析 JSON → data dict → executor 属性 → consumer 注入 target dict。调试页（ExpDebugPage）新增 task_args 输入框。改动：models.py（3个 TextField + migration）、tasks.py（2处 .values()）、auto_scan_task.py（startTask 解析）、batch_exp_task.py（startTask 解析 + data dict + .values()）、batch_task_executor.py（__init__ 存储 + _build_exp_cache 加 plugin_language + consumer 注入）、auto_exp_task.py（__init__ 存储 + consumer 注入）、dirscan_worker.py（phase1→phase2→consumer 传递链）、exp_debug.py（2处注入）、前端 4 个页面（AutoScanTaskListPage / BatchTaskListPage / DirscanTaskListPage / ExpDebugPage）。
+- **插件名解析统一收口为 resolve_exp_by_name（BL-PLUGIN-009 配套）**：6 处重复的正则 `[CVE]Title` 解析逻辑统一替换为共享函数。查找策略：CVE+title 精确匹配 → title 匹配 → 原始字符串匹配。兼容空 CVE（`[]插件名`）、纯标题、含 CVE 前缀标题三种格式。改动：poc_runtime_resolver.py（+20行）、expResult.py（重用共享函数）、batch_exp_task.py（get_pligun_name 收口）、exp_debug.py（debug_getExpInfo/debug_execute/expload_save 三个回退路径收口）、all_auto_exp_result.py（1处）。
+- **修复 expResult.py targetRunVerify 预存 bug**：plugin 或 target 参数缺失时函数返回 None 导致 500；正则不兼容空 CVE 格式 `[]插件名` 导致"plugin title parse failed"。改为统一走 resolve_exp_by_name。改动：expResult.py（targetRunVerify + getPluginInfo）。
+- **Python PoC 插件 target 参数从字符串改为字典（BL-PLUGIN-009）**：所有 Python 插件入口方法（_verify/_cmd_exc/_code_exc/_attact）的 target 参数从字符串 URL 改为 `{"target": url}` 字典，与 YAML 插件接口统一。poc_runtime_resolver 加类型校验拒绝字符串。8 个调用点统一传 dict。16 个插件文件逐文件改造（入口提取 url、helper 保持字符串、return 写回字符串）。新增 3 个单元测试验证类型守卫。改动：poc_runtime_resolver.py（+8行）、batch_task_executor.py（2处改）、auto_exp_task.py（1处）、exp_debug.py（2处）、batch_exp_task.py（1处）、dirscan_worker.py（1处）、expResult.py（1处）、EXP_plugin/*.py（16 个）、tests.py（+40行）。
+## 2026-06-15
+- **目录扫描漏洞验证 URL 改为根路径（BL-DIRSCAN-016）**：Phase2 漏洞验证传给 POC verify 的 target 从 `协议://host:端口/path` 改为 `协议://host:端口`，不带 path，兼容大部分 POC 对根路径做检测的实际行为。改动：dirscan_worker.py（-1行）。
+## 2026-06-14
+- **漏洞结果通过 identify_result_id 关联根资产（BL-DIRSCAN-015）**：auto_scan_exp_result 新增 identify_result_id 字段，写入点 _write_auto_exp_event 从 target URL 解析 (protocol, host, port) 查建根资产并写入关联 ID。查询端 7 处改为 identify_result_id__in（替代 target__in/target JOIN），facet/搜索 task_type 放宽为 IN (1,2,3)。批量任务新增写入 auto_scan_exp_result（task_type=3）。已有数据通过 backfill_identify_result_id 管理命令回填（覆盖率 100%）。支持无 scheme 的 target 自动补 http://。改动：models.py（+1行+migration）、result_event_service.py（+22行）、batch_task_executor.py（+12行）、auto_scan_result.py（4处共改）、asset_search_parser.py（2处）、tasks.py（1处）、tests.py（测试数据同步 +6行）、management/commands/backfill_identify_result_id.py（新建）。
+- **资产检索漏洞查询去除 task_id 过滤**：漏洞展示不再绑定单一任务，同一资产被多个任务扫到的所有漏洞统一展示。6 处查询点同步改为 target__in + task_type=1 过滤，列表 + facet 统计 + 搜索过滤 + CSV 导出全部覆盖。索引改为 `(task_type, target, task_id)`。新增漏洞去重。改动 8 文件。
+- **auto_scan_exp_result 新增 task_type 字段**：区分自动扫描(1)/目录扫描(2)，索引改为 `(task_type, target, task_id)`。写入路径 dirscan_worker 传 task_type=2，查询路径加 task_type=1 过滤。改动 9 文件。
+- **目录扫描结果页移除"网站图标"列**：该字段实际未使用，移除了前端列定义和 interface 中的 favicon/favicon_md5 字段，同时清理未使用的 Tooltip import。改动：DirscanResultsPage.tsx（-15行）。
+- **目录扫描结果页"页面长度"列排序 500 修复**：`models.X.field` 是 DeferredAttribute 不能直接调 `.desc()`，改为 `F("content_length").desc(nulls_last=True)`。改动：auto_scan_result.py（+1行/-2行）。
+- **目录扫描结果页"页面长度"列支持排序**：点击列标题切换：默认不排序 → 最长优先 ↓ → 最短优先 ↑ → 不排序。后端 dirscan_results_api 新增 sort 参数（content_length_desc/content_length_asc），null 值始终排末尾。改动：auto_scan_result.py（+5行）、DirscanResultsPage.tsx（+15行）。
+- **目录扫描响应头补全状态行**：响应头字段原来只有 Key: Value 逐行，缺少第一行 HTTP 版本 + 状态码 + 原因短语。现在改成 `HTTP/1.1 200 OK\nContent-Type: ...` 的完整格式。改动：dirscan_worker.py（+1行）。
+- **目录扫描阻断响应记录与 content_length 字段**：目录扫描 Web 阶段遇到二进制/大文件 URL（Content-Type 不在白名单或 Content-Length 超阈值）时，现在阻断下载后仍将状态码、响应头和内容长度写入 auto_scan_directory_result（body 为空）。新增 content_length IntegerField。改动：models.py（+1行）、dirscan_worker.py（_http_get 返回 5 元组、_fingerprint_and_write 区分阻断/错误、所有调用点传参更新）、auto_scan_result.py（API 序列化 +2行）、migrations/0055。验证：Django migrate ✓ / Probe 脚本双阻断测试 ✓。
+- **目录扫描任务新增结果查看功能**：目录扫描任务列表页操作列新增"查看结果"按钮，点击后新标签页打开 DirscanResultsPage（按 task_id 过滤），复用资产检索目录扫描结果页。后端 dirscan_results_api 增加 task_id 参数支持。改动：auto_scan_result.py、DirscanResultsPage.tsx、DirscanTaskListPage.tsx。
+- **目录扫描结果页新增"清除筛选"按钮**：点击一键清空所有筛选条件并重置页码，仅在有筛选时显示。改动：DirscanResultsPage.tsx。
+- **分页栏页码输入框与按钮对齐修复**：`.react-pagination-actions` 增加 `align-items: center`；4 个页面的分页输入框高度从 30px 统一改为 34px（与按钮同高）。改动：styles.css、DirscanResultsPage.tsx、DictListPage.tsx、PluginListPage.tsx、PocGenTaskListPage.tsx。
+- **目录扫描结果页"目标"列改为超链接**：点击在新标签页打开目标 URL。改动：DirscanResultsPage.tsx。
+- **目录扫描结果页新增列筛选功能**：URI路径/产品/标题/证书组织/证书部门/证书主体/状态码 7 列支持下拉筛选，目标列支持模糊搜索。后端新增 `dirscan_results_filters_api` 返回各列去重选项，`dirscan_results_api` 增加过滤参数。前端 DirscanResultsPage 新增 filterDropdown。改动：auto_scan_result.py、urls.py、DirscanResultsPage.tsx。
+- **资产检索页新增目录扫描按钮**：资产检索每行端口概览区域"同IP端口详情"右侧新增"目录扫描"按钮，展开资产时异步查询（check_only，走 host+port+protocol 索引 EXISTS），仅存在结果时显示。新标签页打开 DirscanResultsPage，分页展示该资产的完整目录扫描结果（端口/URI/状态码/标题/产品/图标/证书/响应头/正文）；XSS 防护标题+正文均转义。按钮去掉了原"同IP端口详情"的重复外链图标。后端新增 GET /api/v1/assets/dirscan-results 端点（含 check_only 模式和分页）。改动：auto_scan_result.py（+60行）、urls.py（+1行）、DirscanResultsPage.tsx（新建 175行）、GlobalAssetSearchPage.tsx（+20行）、App.tsx（+5行）、migrations/0054_extend_dirscan_target.py。
+- **字段长度截断加固**：auto_scan_directory_result.target 128→512（含迁移0054）；dirscan_worker.py target截断对齐512 + uri_path新增[:512]截断；result_event_service.py 的 auto_scan_exp_result(target/product) 和 EXPTask_result(target/plugin_name) 写路径补 [:128] 截断。改动：models.py、dirscan_worker.py、result_event_service.py、migrations/0054。
+- **URL爬取超时动态化**：总超时从写死 300s 改为 N × 100 + 30s（N 为 URL 个数），每个 URL 单页超时 90s → 100s；确认多 URL 图片 MD5 命名无冲突。改动：poc_gen_task.py（+4行/-4行）、docs/modules/10-AI生成PoC模块.md。
+- **AI生成PoC任务编辑与重试**：列表页新增"编辑"按钮（弹出表单可改标题/模型/代理/URL/参考资料，task_type和上传文件不可改）、"重试"按钮（仅url_crawl类型，清空资料目录重爬）。后端 api_task_detail POST 扩展支持元数据编辑，新增 api_retry 端点。改动：poc_gen_task.py（+67行/-0行）、urls.py（+2行/-1行）、PocGenTaskListPage.tsx（+170行/-0行）。
+- **AI生成PoC任务列表加翻页**：GET /api/v1/poc-gen-tasks 增加 page/rows_per_page 参数，返回分页元数据；前端列表底部加翻页栏（页码跳转、上一页/下一页、总数）。改动：poc_gen_task.py（+9行/-3行）、PocGenTaskListPage.tsx（+35行/-8行）、pocGenTask.ts（+3行）。
+- **URL爬取图片提取修复**：懒加载图片提取率为零的根因修复。原因：原流程先提取 HTML 再滚动触发懒加载，微信等站点图片只有 data-src 无 src → turndown 生成空链接。修复三项：(1) 重组执行顺序——渐进滚动→等图片加载→currentSrc修正→再提取 HTML；(2) img.currentSrc 兜底修正 DOM src 与实际加载 URL 不一致；(3) JS/Python 两端正则放宽 [^)]* 允许匹配空 URL，避免静默跳过。超时 30s→90s。改动：scripts/crawl_urls.js（+44行/-10行）、app_cybersparker/utils/folder2json.py（+1行/-1行）、app_cybersparker/views/ai_poc/poc_gen_task.py（+1行/-1行）。
+- **URL爬取图片提取修复**：懒加载图片提取率为零的根因修复。原因：原流程先提取 HTML 再滚动触发懒加载，微信等站点图片只有 `data-src` 无 `src` → turndown 生成 `![图片]()` 空链接。修复三项：(1) 重组执行顺序——渐进滚动→等图片加载→currentSrc修正→再提取 HTML；(2) `img.currentSrc` 兜底修正 DOM `src` 与实际加载 URL 不一致；(3) 正则在 JS/Python 两端放宽 `[^)]*` 允许匹配空 URL，避免静默跳过。超时 30s→90s。改动：`scripts/crawl_urls.js`（+44行/-10行）、`app_cybersparker/utils/folder2json.py`（+1行/-1行）、`app_cybersparker/views/ai_poc/poc_gen_task.py`（+1行/-1行）。
+## 2026-06-12
+- **AI生成PoC新增"直接输入文本"任务类型**：新建任务时选"直接输入文本"，粘贴参考资料内容直接存入数据库，跳过资料提取阶段直接进入 ready 状态。改动：`models.py`（+1行）、`poc_gen_task.py`（+12行/-3行）、`PocGenTaskListPage.tsx`（+20行/-10行）、`pocGenTask.ts`（+1行/-1行）。
+- **URL爬取反爬对抗**：加入完整浏览器伪装——`navigator.webdriver` 删除、`chrome.runtime` 模拟、plugins/languages/platform/WebGL 伪装、完整 Chrome UA + Accept-Language、懒加载图片滚动触发、微信"阅读全文"展开、Chromium 自动检测。WeChat MP 等有反爬的站点现在可正常爬取。改动：`scripts/crawl_urls.js`（+120行/-5行）。
+- **EXP_plugin 目录排除 Django 自动重载**：`AppConfig.ready()` 中 monkey-patch `iter_all_python_module_files`，过滤掉 `/EXP_plugin/` 路径。动态加载的 exp 插件文件变更不再触发开发服务器重启，避免中断正在执行的任务。改动：`app_cybersparker/apps.py`（+11行）。
+- **AI生成PoC图片下载与识图转文字修复**：四缺陷修复。(1) crawl_urls.js 用 networkidle2 等太久→SOCKS5 代理下 GitHub JS 移除加载失败的 img→改为 domcontentloaded+waitForSelector 提前抓取；(2) 图片下载两次（Puppeteer 浏览器加载一次+Python requests.get 再下载一次）→Node.js 端用 response 拦截器直接拿浏览器已加载的图片 buffer 写磁盘，markdown 引用改为本地路径；(3) 图片下载到临时目录处理完就删→Node.js 端保存到 save_dir；(4) 没配识图模型时跳过全部图片处理→图片始终保存，配了识图模型时再调 Python 端 process_markdown 转文字。改动：crawl_urls.js（重写图片保存逻辑）、poc_gen_task.py（简化）、folder2json.py（保留 file_upload 模式的远程图片下载能力）。
+- **AI生成PoC图片下载与识图转文字修复**：URL 爬取后 markdown 中的图片有三处缺陷：(1) turndown 产出域名相对路径，`download_image` 收到后 `requests.get()` 报 MissingSchema；(2) 图片下载到临时目录处理完就删；(3) 没配识图模型时跳过全部图片处理。修复：`resolve_image_path` 加 `base_url` 参数补全 scheme → 域名相对路径可正常下载；图片持久化到 `material_dir/images/`；无识图模型时仍下载图片。改动：`folder2json.py`（+14行/-7行）、`poc_gen_task.py`（+23行/-39行）。
+- **AI生成PoC创建任务 413 修复**：nginx 配置缺少 `client_max_body_size`，默认 1MB 限制导致文件上传模式的创建任务请求被 nginx 直接拒绝（413 Request Entity Too Large），请求根本到不了 Django。修复：`deploy/nginx/react-shell.conf` 加 `client_max_body_size 100m`，与 Django 端 `MAX_UPLOAD_SIZE` (100MB) 对齐。
+- **全局资产检索 task_id 过滤修复**：搜索解析器中 `task_id` 的值始终保持字符串类型，但 `AssetTaskRelation.task_id` 是 `IntegerField`。导致 PostgreSQL 类型不匹配错误被静默吞掉，用户用 `task_id:"65"` 无条件查到结果。修复：`to_query_structure()` 中 `task_id` 分支把 `value` 转为 `int`，非数字时返回空查询。改动：`app_cybersparker/services/asset_search_parser.py`（+3行/-1行）。
+- **同 IP 端口详情页标题列固定宽**：主表和目录扫描子表的"标题"列加固定宽度（200px/160px）+ `ellipsis`，长标题截断显示省略号，防止挤出后面列。改动：`frontend/src/pages/IpPortDetailPage.tsx`（+2行/-2行）。
+- **自动扫描任务暂停后误标记为完成**：`is_over` 初始值为 `True`，`check_pause_signal()` 检测到暂停信号时只设 `pause_requested=True` 没把 `is_over` 置为 `False`。导致 `run()` 和 `_run_auto_scan_task()` 两处暂停分支都被跳过，`compare_and_set_terminal_state` 将任务标为 success（status=1, process=100%）。修复：两处暂停检测路径（Redis/DB）均同步 `self.is_over = False`。改动：`app_cybersparker/views/expload/task_manage/auto_exp_task.py`（+2行）。
+- **antd 6.x Select 文字偏上裁切**：antd 6.x 无 `.ant-select-selector`，根元素 `.ant-select` 即是选择框；选中值渲染在 `.ant-select-content` 直接文本节点中（非 `.ant-select-selection-item`）。body `line-height: 1.55` 被继承导致文字溢出被 `overflow:hidden` 裁切；搜索 input 在 flex 流里开关下拉时尺寸变化挤动文本。修复：`.ant-select` 设 `align-items:center` + `padding-block:0`，`.ant-select-content` 设 `align-items:center` + `line-height:1.35` + `overflow:visible`，`.ant-select-input` 设 `position:absolute` 脱离 flex 流。改动：`frontend/src/styles.css`（+57行/-3行）。
+- **批量任务"结果"按钮跳转错误**：跳转到 `/react-shell/auto-exp-results`（`auto_scan_exp_result` 表），但批量结果存在 `EXPTask_result` 表。修复：URL 改为 `/react-shell/exp-results?task_id=...`，后端 `expResult.py` 新增 `task_id` 过滤，前端 `ExpResultListPage` 新增 `task_id` 参数透传。改动：`batch_exp_task_api.py`、`expResult.py`、`ExpResultListPage.tsx`。
+- **Nuclei 调试结果不展示**：不匹配时返回 `status: False`，前端 `client.ts` 检测到 `status===false` 即抛异常，显示 `{"error": "Request failed with status 200"}` 丢弃调试轨迹。修复：执行成功始终返回 `status: True`，用 `matched` 区分命中/未命中。改动：`exp_debug.py`（两处 handler）。
+- **插件调试页代理选择**：调试执行时继承了全局默认代理（SOCKS5），页面无代理选择入口。修复：后端新增 `_apply_debug_proxy` 函数，`proxy_id=0` 直连，其他查库；前端加代理下拉框，加载 `/api/v1/proxies` 列表。改动：`exp_debug.py`（+43行/-3行）、`ExpDebugPage.tsx`（+16行/-1行）。
+- **指纹关联保存后消失**：`plugin_manage.py` 中 `update_exp_relate_fingerprints` 的删除检查用 `str(record.fingerprint_id.id) not in fingerprint_id_list`，但列表里是整数。字符串 `"98687"` 不在整数列表 `[98687]` 中→刚创建的记录被误删。修复：去掉 `str()`。改动：`plugin_manage.py`（-1行/+1行）。
+- **Nuclei OOB/ceye 探测三重修复**：①`_needs_oob_context` 只检查 matcher 的 `part` 字段，DSL 表达式 `len(interactsh_request)>0` 中的 OOB 引用被漏掉→新增扫描 `dsl` 表达式文本。②HTTP 请求发出后立即查 ceye，DNS 未传播到→结果为空→matcher 失败→`result=False`→`run_nuclei_template` 的 `if result and any(...)` 跳过第二次查询。修复：去掉 `result` 前置条件，强制重新查询，有 OOB 记录时补 `matched:True`。③`_execute_http_request` 中 `_attach_oob_context` 漏传 `trace_fn`，ceye 查询 trace 被静默吞掉。④`_poll_ceye` 首查前新增 5s 等待，给 DNS 传播留时间。改动：`nuclei_runtime_engine.py`（+20行/-5行）。
+## 2026-06-10
+- **目录扫描任务表单修复**：①代理下拉空白——前端 `ProxyOption` 接口字段名与后端 API 不一致（期望 `name`/`host` 但 API 返回 `proxy_type_label`/`proxy_address`/`proxy_port`），修正接口定义和渲染。②源任务选择加搜索框、分页（每页10条）、选中高亮、取消全选按钮，容器美化。改动：`frontend/src/pages/DirscanTaskListPage.tsx`。
+- **关闭 Celery 全局超时**：`CELERY_TASK_TIME_LIMIT` / `CELERY_TASK_SOFT_TIME_LIMIT` 从 7200/6900 改为 `None`。三类任务均有应用层心跳机制（每约 10s 更新 `heartbeat_at`），僵尸回收通过心跳检测真正死掉的任务，不需要 Celery 层面额外按墙上时钟杀任务。119 分钟一刀切导致正常长任务被误杀。改动：`cybersparker/settings.py`（+2行/-2行）。注意：需重启 Celery worker 生效。
+- **指纹关联插件管理确认弹窗**：删除关联插件和添加关联插件时，加 `Modal.confirm` 确认弹窗，避免误操作直接生效。改动：`frontend/src/pages/FingerprintListPage.tsx`（+10行/-2行）。
+- **僵尸回收误杀运行中任务修复**：`startup_time` 窗口从 5 秒放宽到 `heartbeat_interval * 3`（30 秒），避免 Django 重启时因 Celery 心跳还在正常周期内（6-10 秒前更新）被误判为僵尸。同时僵尸回收标记已停止时发 stop signal，确保还在运行的 executor 能收到并退出。三种任务类型同步修复。改动：`apps.py`（+30行/-12行）。
+- **目录扫描创建任务报错修复**：`DirScanTaskForm` 缺少 `source_tasks` 字段，导致模型 `clean()` 校验时 `source_tasks` 永远为空，手动选择源任务模式下总是报"必须选择至少一个源任务"。把 `source_tasks` 加入表单字段列表。改动：`app_cybersparker/views/expload/dirscan_task_manage.py`（+2行）。
+- **目录扫描 Celery 崩溃修复**：扫描到超长 URL（>128 字符）时，写入 `auto_scan_directory_result.target`（varchar(128)）触发 `DataError`，未捕获异常导致 worker 崩溃。入库前对 `final_url` 截断到 128 字符。改动：`app_cybersparker/services/dirscan_worker.py`（+3行）。
+- **批量任务 HTTP 超时配置**：`batch_EXPTask` 新增 `http_timeout` 字段（默认 10s）。启动时注入 `conf.timeout`，插件内 `requests.get/post` 走 request runtime 的超时设置，不再硬编码默认值。模型、表单、详情 API、执行器、前端表单同步更新。改动：`models.py`（+1行）、`batch_exp_task.py`（+3行）、`batch_task_executor.py`（+3行）、`BatchTaskListPage.tsx`（+5行）、`0053_add_batch_http_timeout.py`（新增）。
+- **批量任务 HTTP 超时配置**：`batch_EXPTask` 新增 `http_timeout` 字段（默认 10s）。启动时注入 `conf.timeout`，插件内 `requests.get/post` 走 request runtime 的超时设置，不再硬编码默认值。改动：`models.py`（+1行）、`batch_exp_task.py`（+3行）、`batch_task_executor.py`（+3行）、`BatchTaskListPage.tsx`（+5行）、`0053_add_batch_http_timeout.py`（新增）。
+- **指纹-EXP 缓存去重 bug 修复**：`_build_fingerprint_exp_cache` 和 dirscan phase2 的缓存以 `exp_id` 为 key，每个 EXP 只存一个 product 名。一个 EXP 关联了多个不同产品名的指纹时（如同时关联 nginx 和 apache），后续产品名被静默跳过，导致扫描到被覆盖的产品名时匹配不到 EXP。改为 `set` 存储所有产品名，匹配用集合交集。改动：`auto_exp_task.py`（+6行/-4行）、`dirscan_worker.py`（+5行/-3行）。
+- **审计修复（二轮，4 条）**：①分页 fallback 分支加 `carried_total=0` 防 annotation exact_total 被旧 cursor 值覆盖（高）；②暂停信号路径补 `updated` 返回值检查（中）；③三处 fallback 分支统一 `order_by` 写法。改动：`auto_scan_result.py`（+4行/-1行）、`auto_scan_task.py`（+3行/-1行）、`batch_exp_task.py`（+3行/-1行）。
+- **审计修复（一轮，10 条）**：①分页跳页回退分支补 `exact_total`（避免 cursor 丢失总数）；②删除 `save_indentify_to_db` 重复 `extra` 赋值；③批量任务僵尸回收补 `stop_requested` 条件、分离运行中/已暂停两种回收逻辑（已暂停任务不再误改 endTime）；④暂停操作加 `status=2` 乐观锁防 TOCTOU；⑤DNS 解析加超时（`asyncio.wait_for`/`setdefaulttimeout`）；⑥IPv6 地址检测补齐；⑦prev 方向空结果回退首页；⑧死代码 `cursor=""` 删除；⑨poc_generation 队列测试配置确认。改动：`auto_scan_result.py`、`auto_exp_task.py`、`auto_scan_task.py`、`batch_exp_task.py`、`apps.py`。
+## 2026-06-09
+- **裸域名输入扫描不入库 + 跳转按钮打开本系统页面 + 基础信息 IP 显示域名修复**：三个根因：①裸域名无 scheme 导致 urlparse 拿不到 hostname；②target/DNS/hostname 三个字段存的就是域名；③peername 或 DNS 没拿到解析 IP 时 ip 字段回退到 hostname（域名）。修复：`request_scan()` 把实际请求的 `candidate_url` 携带到 extra 中，`save_indentify_to_db()` 用候选 URL 正确提取 scheme/hostname/port；域名资产 DNS 解析兜底——peername / 代理 DNS 都没拿到 IP 时再调 `socket.getaddrinfo` 解析一次。改动：`app_cybersparker/views/expload/task_manage/auto_exp_task.py`（+20行/-8行）。
+- **服务重启后任务卡在"运行中"/"暂停中"修复**：重启 Celery + Django 后 executor 进程已丢失，但 zombie 回收窗口 60s 太宽（心跳若在 60s 内则跳过回收），导致任务永久卡死；暂停时只发 Redis 信号不等回应，无 executor 时信号无人接收同样卡死。修复：①新增 `startup_time` 条件——heartbeat 在当前 Django 进程启动之前的运行中任务一律视为僵尸（上一进程残留 executor）；②zombie 回收窗口缩短为 `heartbeat*3=30s`；③暂停/停止操作时先查心跳——若 executor 已死则直接改 DB 状态，不再发信号。覆盖自动扫描/批量/目录扫描三类任务。改动：`apps.py`（+4行/-4行）、`auto_scan_task.py`（+18行/-3行）、`batch_exp_task.py`（+18行/-3行）。
+- **测试文件硬编码路径修复**：`tests.py` 中 16 处硬编码 `/workspaces/cybersparker` 替换为 `_PROJECT_ROOT`（`Path(__file__).resolve().parent.parent`），避免项目目录重命名后测试无法运行。同时修复 `test_celery_app_declares_expected_queues` 遗漏的 `poc_generation` 队列。
+- **JS跳转误提取修复**：`get_js_redirect_url()` 的 AST 分析器之前不区分"页面加载时立即执行的跳转"和"函数体内的事件回调"。搜索网站的搜索按钮 onclick 函数里的 `window.location = '...'` 被当成页面跳转，导致自动扫描跟进了一个 404 搜索页面。修复：`_walk_ast()` 在函数体内跳过 redirect 赋值；AST 成功解析但未找到跳转时不再回退正则（正则同样无法区分函数体）。改动：`app_cybersparker/services/js_redirect.py`（+50行/-40行）。
+- **跳页越过最后一条返回空结果修复**：keyset 分页的 `skip = page_size * jump` 在跳页超过剩余记录数时，OFFSET 越过所有数据返回 0 行，前端看到"没有识别结果"。修复：跳页返回空时自动回退到尾页/首页。改动：`app_cybersparker/views/expload/task_manage/auto_scan_result.py`（+24行/-8行）。
+- **代理模式下目标 IP 被覆盖为代理 IP 修复**：`request_scan()` 中通过 `response._protocol.transport.get_extra_info("peername")` 获取目标 IP，在 SOCKS5/HTTP 代理模式下 TCP 连接对端是代理服务器，`peername[0]` 返回的是代理 IP 而非目标 IP。修复：代理模式下改为自己 DNS 解析目标 hostname；非代理模式保持原有 `peername` 方式。改动：`app_cybersparker/views/expload/task_manage/auto_exp_task.py`（+30行/-5行）。
+- **JS跳转落地页编码乱码修复**：JS 跳转落地页的解码只用 `resp2.charset`（HTTP 头），当 HTTP 头不带 charset 但 HTML `<meta>` 声明了 gb2312 时，回退 utf-8 导致中文乱码。修复：新增 `_detect_charset_from_html()` 解析 HTML `<meta charset>`，主响应和 redirect 响应都加入编码检测链：`charset → meta→ get_encoding → utf-8`。改动：`app_cybersparker/views/expload/task_manage/auto_exp_task.py`（+22行/-4行）。
+- **指纹与PoC插件双向绑定**：插件编辑页新增关联指纹区域（搜索/添加/删除，覆盖保存），指纹列表页新增关联插件数弹窗（搜索添加/分页/删除，即时生效）。后端新增 5 个 API 端点（fingerprints/plugins GET+POST、fingerprints/plugins/<exp_id> DELETE、exp-debug/info 增加 fingerprints、exp-debug/save 增加 affected_product）。详见 `plans/2026-06-09-BL-FINGER-009-指纹与PoC插件双向绑定.md`。
+## 2026-06-08
+- **PostgreSQL 15 → 17 迁移 + pg_bigm 编译安装**：编写 `deploy/migrate-pg15-to-pg17.sh` 一键迁移脚本（备份→卸载PG15→安装PG17→源码编译pg_bigm→创建扩展→恢复数据→Django迁移）。同步更新 `setup-env.sh`（PG15→PG17 + pg_bigm源码编译）、`docs/modules/pg_bigm-install.md`（PG版本号15→17）、`docs/设计总览.md`（PG版本号）。pg_bigm 无 apt 预编译包，PGDG 仓库只提供 PG17 本体，pg_bigm 需源码编译。
+- **pg_bigm 扩展缺失排查与修复**：`pg_bigm` 是中文全文检索必需扩展，当前环境缺失——扩展文件未编译安装、数据库中无扩展记录、bigm 索引不存在。修复：`deploy/setup-env.sh` 新增 pg_bigm 自动编译安装步骤；`docs/modules/pg_bigm-install.md` 修正 PG 版本号为 15。
+- **nuclei 导入脚本：跳过 info 级别插件的指纹绑定**：`import_nuclei_templates.py` 指纹匹配阶段增加 `severity == "info"` 过滤，info 级别插件不再自动创建 `exp_relate_fingerprint` 绑定。统计输出新增"跳过(info级别)"行，匹配覆盖率计算排除 info 跳过项。
+- **删除指纹-PoC关系表中 severity=info 的绑定**：目录扫描+漏洞验证时，大量指纹绑定的 info 级别 PoC 插件被纳入扫描。直接从 `exp_relate_fingerprint` 表删除 `EXP_id__severity='info'` 的关联记录，共删除 12,161 条（总数 28,246 → 剩余 16,085 条）。不影响 PoC 插件自身和指纹自身。
+- **AI生成PoC：URL爬取报"找不到Chrome"错误**：…(省略)…
+- **AI生成PoC：SOCKS5 代理 URL 爬取报 ERR_EMPTY_RESPONSE**：`_extract_material` 拼接代理地址时写死 `http://` 前缀，SOCKS5 代理被当成 HTTP 代理使用导致代理服务器拒绝连接。改为根据 `ProxySetting.proxy_type` 字段选择协议前缀（1→http, 4→socks5）。改动：`poc_gen_task.py`（+2行/-1行）。
+- **AI生成PoC：URL爬取HTML清洗增强**：爬取产出的 markdown 含大量 HTML 标签残留和页面噪音。新增三层清洗管线：(1) 浏览器端内容提取（GitHub README/blog/知乎/微信公众号站点适配 + 通用正文查找 + 导航/页脚/侧边栏噪音移除）；(2) turndown 自定义规则（table/markdown table、kbd/行内代码、空元素移除）；(3) markdown 后清洗（残留标签去除 + HTML 实体解码 + 多余空白合并）。改动：`scripts/crawl_urls.js`（重写，+200行/-50行）。
+- **项目启动文档适配 Debian 12 amd64**：项目从 arm64 Docker 环境迁移到 Debian 12 x86_64 容器，更新 `docs/项目启动文档.md` 中 PostgreSQL 安装方式（Conda → Debian apt postgresql-15）、Chromium 路径（chromium-browser → /usr/bin/chromium）、启动命令、排障说明。改动：`docs/项目启动文档.md`（重写 PostgreSQL/Chromium/浏览器安装三个段落）。
+- **项目启动文档新增"跨平台迁移 git 权限变更"排障条目**：记录 Windows Docker 环境下文件权限全变 777 导致 git 显示大量假变更的现象、原因和修复脚本（`git config core.filemode false` + `git update-index --refresh`）。改动：`docs/项目启动文档.md`（新增常见问题条目）。
+- **新增环境自动安装脚本 `deploy/setup-env.sh`**：幂等一键安装 PostgreSQL 15 / Redis 7 / Nginx / Chromium / Node.js npm 依赖 / git 权限修复，支持环境变量自定义端口和密码。启动文档"首次启动"节新增快速安装入口。
+- **新增 Nginx 安装与部署**：安装 Nginx 1.22，修复 `deploy/nginx/react-shell.conf` 旧路径（cybersparker → cybersparker），部署站点配置（React 编译产物直出 + API 转发 Django :8999）。`setup-env.sh` 新增第 7 步 Nginx 自动安装/配置。`项目启动文档.md` 新增 Nginx 手动安装步骤和「快速验证」补充 `nginx -t`。`deploy/nginx/README.md` 旧路径同步修正。
+## 2026-06-07
+- **AI生成PoC：插件类型从创建时必选改为执行页可选切换**：用户创建 PoC 生成任务时不再需要指定 Python/Nuclei，进入执行页面后可随时切换插件类型，系统自动加载对应提示词模板。`plugin_language` 字段改为可空 + migration 0052。改动：`models.py`（1行）、`poc_gen_task.py`（+10行/-8行）、`PocGenTaskListPage.tsx`（-8行）、`PocGenTaskExecutePage.tsx`（+25行）、`pocGenTask.ts`（1行）、`0052_plugin_language_nullable.py`（新迁移）。
+- **AI生成PoC：创建任务时代理下拉为空**：代理列表 API（`/api/v1/proxies`）返回的 JSON 没有 `status` 字段（只有 `items`），前端用 `proxyRes.status` 判断导致永远不成立。改为 `proxyRes && proxyRes.items`。改动：`PocGenTaskListPage.tsx`（1行）。
+- **AI生成PoC：资料提取加日志**：`_extract_material` 和 `_run_crawl_urls` 全程写入 `error_log/<日期>_error-log.txt`（`[ai_poc]` 前缀），覆盖爬取开始/结果/异常/脚本 exit code/Puppeteer stderr/Node.js 缺失等节点。改动：`poc_gen_task.py`（+27行）。
+- **项目启动文档补全 AI PoC 依赖**：新增 Node.js/Chromium 运行时依赖说明、`scripts/` npm 安装步骤、`poc_generation` Celery 队列、`AI_PoC/` 目录、Dockerfile 额外依赖、AI PoC 常见问题排障。改动：`docs/项目启动文档.md`（+35行）、`docs/开发文档索引.md`（+4行）。
+- **新增AI模型配置（BL-AIPOC-001）**：新增 `AIModelConfig` 数据模型 + migration；CRUD JSON API（GET/POST/DELETE `/api/v1/ai-model-configs`）；React 页面 `AiModelConfigPage.tsx`（列表/新增/编辑/删除/按类型筛选，API Key 脱敏展示）；侧边栏"系统配置"新增"AI模型配置"入口。改动：`models.py`（+18行）、`ai_model_config.py`（新文件）、`urls.py`（+3行）、`AiModelConfigPage.tsx`（新文件）、`aiModelConfig.ts`（新类型）、`App.tsx`（+2行）、`SidebarLayout.tsx`（+2行）。模块文档：`docs/modules/10-AI生成PoC模块.md`，backlog：`docs/backlog/10-AI生成PoC.md`，plan：`plans/2026-06-07-AI生成PoC-需求澄清.md`。
+- **新增PoC生成任务（BL-AIPOC-002）**：新增 `PoCGenerationTask` 数据模型（46 字段含 4 个提示词/生成结果/状态机）+ migration；CRUD JSON API（GET/POST/DELETE `/api/v1/poc-gen-tasks`）；创建任务时异步启动资料提取（URL 爬取调 Puppeteer + Turndown，文件上传调 folder2json + 自动解压）；支持 DNS rebinding 防护和 IPv4/IPv6 内网拒绝；新增 `scripts/crawl_urls.js` + `scripts/package.json`；`test-ai2poc/folder2json.py` 迁移到 `app_cybersparker/utils/`；React 页面 `PocGenTaskListPage.tsx`（列表/创建/删除，创建表单含思考模型/识图模型/代理/URL 多行/文件上传）；侧边栏"任务管理"新增"AI生成PoC"入口；Dockerfile 新增 chromium/nodejs/npm + 系统库；`requirements.txt` 新增 openai/dashscope/py7zr。改动：`models.py`（+55行）、`poc_gen_task.py`（新文件）、`crawl_urls.js`（新文件）、`package.json`（scripts/新文件）、`folder2json.py`（迁移）、`utils/__init__.py`（新文件）、`urls.py`（+3行）、`Dockerfile`（+5行）、`requirements.txt`（+3行）、`PocGenTaskListPage.tsx`（新文件）、`pocGenTask.ts`（新类型）、`App.tsx`（+2行）、`SidebarLayout.tsx`（+2行）。
+- **新增PoC生成执行页面（BL-AIPOC-003）**：Celery 异步生成任务 `app_cybersparker/tasks/poc_gen.py`（openai 协议调用 + 提示词拼接含注入防护 + JSON 解析容错 + 非 JSON 响应原封展示）；poc_generation 独立 Celery 队列（time_limit=180s）；`POST /api/v1/poc-gen-tasks/<id>/generate` 投递 + 前端 2s 轮询；`apps.py` 僵尸回收（pending/generating→ready，crawling→pending）；React 执行页面 `PocGenTaskExecutePage.tsx`（左右布局：4 个可编辑 TextArea 失焦保存 + 右侧代码展示/元数据/模型反馈）；2s debounce + 409 幂等。改动：`poc_gen.py`（新文件）、`poc_gen_task.py`（+25行 generate 端点）、`celery.py`（+2行队列/路由）、`apps.py`（+15行僵尸回收）、`PocGenTaskExecutePage.tsx`（新文件）、`urls.py`（+2行）。
+- **新增保存PoC到EXP插件库（BL-AIPOC-004）**：`save_ai_generated_poc()` 函数（SHA256 去重、severity/type 校验、写文件 + ContentFile 入库、cveExtensions 创建、tags 关联、title 唯一约束冲突自动追加后缀）；`POST /api/v1/poc-gen-tasks/<id>/save-to-exp` API；前端补填 title 弹窗 + 保存按钮。改动：`poc_gen_task.py`（+120行 save-to-exp 端点+save_ai_generated_poc 函数）、`PocGenTaskExecutePage.tsx`（+保存按钮+title弹窗）、`urls.py`（+1行）。
+- **新增文件管理模块（BL-FILE-001 + BL-FILE-002）**：独立文件管理页 `/react-shell/target-files`，支持 .txt 目标文件上传（30MB 限制、重名加后缀）、下载、单个/批量删除（含任务引用检查和 `history_files` 字段同步清理）；侧边栏"系统配置"新增"文件管理"入口；后端 API 双重路径校验防穿越；新增 Celery Beat 定时任务每天清理超过 60 天的测绘引擎数据文件（`EXP_input/engine_assets/`）。改动：`target_file_manage.py`（新文件）、`TargetFileListPage.tsx`（新文件）、`tasks.py`（新增 cleanup task）、`settings.py`（Beat schedule）、`urls.py`、`App.tsx`、`SidebarLayout.tsx`。模块文档：`docs/modules/09-文件管理模块.md`，backlog：`docs/backlog/09-文件管理.md`，plan：`plans/2026-06-07-文件管理实现.md`。：SafeTestRunner 切换测试数据库后会删除旧连接 wrapper，诊断测试隔离全局任务句柄；历史测绘输入源只读取 `EXP_input/engine_assets/` 下的文件，新 API `/api/v1/identify-tasks/history-engine-results` 增加契约测试；历史测绘结果列表改为块读取统计非空行；结果检索计时输出改为 `logger.debug`；新增前端 TypeScript 编译级契约测试；RISK-002 记录到 `docs/项目风险项.md`，同步修正测试数量和旧模板回退文档口径。
+- **批量/自动扫描任务历史测绘结果输入源前端修复**：input_type=5（历史测绘结果）后端 resolve_target_source 和 choices API 均已支持，但前端两个表单页面缺失选择控件——选中后表单下方空白，无法选择具体历史结果。修复：新增 `HistoryEngineResultPicker` 组件（展示引擎类型/查询语句/任务名/目标数，支持搜索/排序/多选）；`BatchTaskListPage` 和 `AutoScanTaskListPage` 接入 input_type=5 的 UI 控件、提交逻辑和编辑回填。后端同步修复：`auto_scan_task_api.task_history_engine_results_api` 返回裸 list 改为 JsonResponse；批量任务新增 `/api/v1/batch-tasks/history-engine-results` 路由。改动：`HistoryEngineResultPicker.tsx`（新文件）、`BatchTaskListPage.tsx`、`AutoScanTaskListPage.tsx`、`auto_scan_task_api.py`、`urls.py`。
+- **测试套件修复：228→219 个测试通过，46→2 个失败**：修复 34 个过时测试（`build_identify_event_payloads` 新增 `host` 参数导致参数移位、`check_rule` 移入 `fingerprint_matcher.py` 未更新 import、`list` 视图函数遮蔽 Python 内置 `list()`、事件 publish/consume 在 `memory://` broker 下路径断开、`exp_debug` 返回 status 仅看 key 存在不看值、`Task_handler` 夹具缺少 `input_type`/`pause_requested`/`_last_pause_check_at`、Celery 队列 `dir_scan` 未在预期列表等）。删除 9 个测已删除行为/模板的测试（React 迁移后的旧 Django 模板、重构后的 `remove_target_file` 调用路径、favicon 存储格式变更等）。剩余 2 个失败是 SafeTestRunner ENGINE 切换不完整的已知问题，单独运行均通过。改动：`tests.py`（-367 行）、`result_event_service.py`（+10 行）、`exp_debug.py`（status 改为 `bool(result.get("matched"))`）、`auto_scan_task.py`（`list` → `task_list_view`）。
+- **三类任务页面搜索框空内容点击搜索改为刷新当前页**：之前无论搜索框有没有内容，点搜索都会 `setPage(1)` 跳回第一页。用户在第 2/3 页想刷新一下看任务状态变化，还得翻回来。现在空搜索走 `refreshKey` 强制刷新数据，页码保持不变；有内容才正常搜索+跳回第一页。改动：`AutoScanTaskListPage.tsx`、`BatchTaskListPage.tsx`、`DirscanTaskListPage.tsx`。
+- **字段级表单错误信息正确显示**：后端返回 `{"status": false, "error": {"engine_proxy": ["强制代理模式下必须选择代理"]}}` 时，`client.ts` 只取 `data.errors`（复数）而忽略 `data.error`（单数，Django form errors），且 `error` 值是数组需拍平。修复后同时接受 `error`/`errors` 两种键名，数组值自动取首项，无 `tips`/`message` 时从字段错误拼文案。同时 `AutoScanTaskListPage.tsx` 给 `engine_proxy`/`engine_proxy_mode` 字段增加错误展示 span。
+- **自动扫描任务完成时 pause_requested 残留修复**：非 Celery 模式（直连线程）下，任务完成后 `.update(status=1)` 没带 `pause_requested=False`，导致前端显示任务已完成但 `pause_requested` 仍是"是"。已补上。批量任务引擎失败路径同修。改动：`auto_scan_task.py:741`、`batch_exp_task.py:818`。
+- **三类任务（自动扫描/批量/目录扫描）英文报错汉化**：Django form validation 错误（`This field is required.`→`此字段为必填项`）、操作提示（`Data does not exist`→`数据不存在`）、成功消息等约 50 条英文报错改为中文。改动：`auto_scan_task.py`、`batch_exp_task.py`、`auto_scan_task_api.py`、`dirscan_task_manage.py`。
+- **目录扫描已停止任务支持续跑**：之前续跑只接受暂停状态（status=2），已停止任务即使 `file_pos` 和 `shuffle_file` 都还在也只能重跑。现在 `resume` 也接受已停止状态（status=3），恢复前检查断点文件是否存在。前端已停止态同步显示续跑按钮。改动：`dirscan_task_manage.py:382-390`、`DirscanTaskListPage.tsx:243`。
+- **Django ModelForm.is_valid() 污染 instance 陷阱文档化**：`app_cybersparker/CLAUDE.md` 新增已知陷阱章节——`is_valid()` 的 `_post_clean()` 通过 `construct_instance()` 逐字段写回 instance，编辑前后值对比必须在 `is_valid()` 之前捕获旧值。
+- **AI 插件生成提示词文档**：新增两份 AI 提示词文档，供第三方 AI 模型按项目规范生成 Python PoC 脚本和 Nuclei YAML 模板。每份提示词明确了格式规范、参数约定、AI 提供 vs 程序自动设置的字段划分。文件：`docs/Python-PoC插件生成提示词.md`、`docs/Nuclei-YAML模板生成提示词.md`，同步更新 `docs/开发文档索引.md`。
+- **目录扫描任务检索语句编辑后"输入源未匹配到任何根资产"修复**：根因是 `task_edit` 在 `form.is_valid()` 之后读 `row_object.search_query` 作为"旧值"。Django ModelForm._post_clean() 通过 `construct_instance()` 把 POST 数据写回 `row_object`，导致新旧值相同、重新冻结永不触发。修复：在 `is_valid()` 之前捕获旧值。同类问题同步修复 `auto_scan_task.py` 和 `batch_exp_task.py` 的 `edit` 函数。同时 `_resolve_input_sources` 增加 `frozen_max_id <= 0` 时跳过 `id__lte` 过滤的防御性检查。改动：`dirscan_task_manage.py:49-66,198-220`、`auto_scan_task.py:294,389-391,448-462`、`batch_exp_task.py:418,523-525,631-656`。
+- **前端 ApiError 消息丢失 tips 修复**：后端返回 `{"status": false, "tips": "..."}` 时，`request()` 函数只取 `data.message`/`data.error` 构造异常消息，`tips` 被丢弃，用户看到无意义的 "Request failed with status 200"。修复后 `data.tips` 优先于 `data.message`。改动文件：`frontend/src/api/client.ts:88`。
+- **文档代码同步性审计修复（28 条差异全部修复）**：详见 `plans/2026-06-07-文档代码同步性审计.md`。
+  - 创建设计总览（`docs/设计总览.md`），覆盖技术栈、模块地图、核心业务流、8 项关键设计决策
+  - antd 版本号修正（5.x→6.x）：前端项目规范 + 模块 08
+  - 模块 01/03/04/05/07/08 接口/架构/模型描述同步到当前代码状态
+  - 所有模块文档的模型行号批量修正（偏移 1~270 行 → 精确）
+  - backlog：6 项状态"未开始"→"已完成"同步；迁移编号与实际 migration 对齐；BL-FINGER-005 重复 ID 重命名
+  - 模块 00 共享资源表更新（conf.proxies 废弃、增加 Redis/Celery/spool/lease）
+  - 模块 06 迁移历史从 5 个扩展到 49 个的完整演进描述
+  - 清理死文件引用（single_task_executor.py、AppLayout.tsx、useApiList.ts）
+  - 标记过时文档（需求规格说明书、内部调用链参考、交接文档）为历史参考
+  - 前端组件目录同步（增补 HistoryFilePicker、删除 AppLayout/useApiList）
+  - 模块 08 API 契约补充 batch-delete 端点
+  - 项目控制台日期/模板数/CHANGELOG 条目同步
+  - 资产检索与目录扫描设计文件移出 00 编号前缀（避免与模块总览冲突）
+- **任务系统代理统一控制**：用 thread-local 替代全局 conf.proxies，任务配置代理 → 所有 requests 走任务代理；任务没配代理 → 强制直连不走 OS 环境变量。同一进程不同线程的任务代理互不干扰（BL-PROXY-002）。
+  - hook_request.py：新增 set_task_proxy/get_task_proxy，sentinel 模式（None=未设置，{}=设置不使用）区分任务/非任务线程
+  - batch_task_executor.py：删除 save/restore，run() + consumer_exp() 入口设 thread-local
+  - auto_exp_task.py：run() + exp_consumer() 入口设 thread-local
+  - dirscan_worker.py：Phase 2 consumer 子线程入口设 thread-local；proxy dict 从 Phase 1 传递
+  - fingerPrint_debug.py：httpx 加 trust_env=False 防止穿透 OS 代理
+  - request_runtime_config_service.py：conf.proxies 赋值标记废弃
+  - 删除 dead code：single_task_executor.py（全项目无引用）
+  - tests：删 2 旧测试，增 6 新测试（覆盖 sentinel 隔离/覆盖/向后兼容/线程隔离）
+- **修复：批量/自动扫描轮询 API 状态字符串与列表 API 不一致**：三个轮询接口（batch 单个/批量、auto_scan 单个/批量）各自硬编码 status 映射（`"stop"` vs `"stopped"`、不检查 `pause_requested`/`startTime`），导致前端轮询覆盖列表状态后操作按钮消失。统一改用 `_status_label()` 复用。（batch_exp_task_api.py, auto_scan_task_api.py）
+- **修复：auto_scan legacy 路径 engine fetch 失败同理**：`auto_scan_task.py` startTask 的 `skip_engine_prepare=False` 分支（死代码但保留一致性）同步修复，失败时恢复 status=1 + 写 last_error + 清 dispatch_token/owner。（auto_scan_task.py）
+- **修复：4 个模块 POST API 缺少 @csrf_exempt 导致 403**：`proxy_setting.py`（create/update/batch_delete）、`cyberspace_engine_setting.py`（create/update/batch_delete）、`dict_manage.py`（dict_group_batch_delete/dict_batch_delete）、`fingerprint.py`（create/update/batch_delete）共 11 个 POST API 补上装饰器。
+## 2026-06-06
+- **侧边栏配置聚合**：代理设置、测绘引擎、DNSLog 配置三项归入"系统配置"父菜单，为后续新增配置页腾导航空间。（frontend/src/components/SidebarLayout.tsx）
+- **任务系统稳定性审计修复（11 项）**：见上方提交 c6cec68。批量暂停状态覆盖、暂停加速排空、队列容量、daemon 线程、spool 优先、relation_buffer batch、trim_stream maxlen、status="2" 死代码清理、dirscan 暂停检查点/POC 异常日志/TTL 下限、引擎 API 分页终止条件。
+- **暂停完成标志残留修复**：批量/自动扫描暂停排空至 100% 时 pause_requested 未清除（Celery 路径 CAS "success" 缺少 pause_requested=False；直连路径 get_progress/_finalize_run 设 status=1 时未附带清除标志；暂停判断未检查 is_over）。
+- **删除 tasks.py 不可达死代码**：`_run_auto_scan_task` 第一个 try 块之后 40 行重复执行块永远不可达（第一个块总是 return/raise）。
+- **nuclei 模板导入脚本增加 git pull**：`import_nuclei_templates` 执行前自动 `git pull --ff-only` 拉取上游模板仓库，新增 `--no-pull` 参数跳过。（import_nuclei_templates.py）
+- **修复：插件调试页保存 nuclei 模板报错**：CVE 为空时编辑保存提示 "title is required"（实际是 CVE 为空但误报），修复后 CVE 可选；日期格式兼容 `YYYY-MM-DD`（api_exp_info 返回的 Django 默认格式）。（exp_debug.py）
+- **新增文档**：`docs/nuclei-模板维护指南.md`（增量导入流程、去重机制、日常维护命令）。（docs/nuclei-模板维护指南.md, docs/开发文档索引.md）
+- **修复：暂停中任务自然完成后 pause_requested 残留**：批量任务暂停排空过程中进度跑到 100% 时，`pause_requested` 标志未清除，前端"暂停请求"列仍显示"暂停中"。根因：`get_progress()` / `_finalize_run()` 设 `status=1` 时没清 `pause_requested`；`run()` 暂停判断没检查 `is_over`。同步修复了自动扫描任务的同类问题（Celery 路径 + 直连路径）。（batch_task_executor.py, auto_exp_task.py, tasks.py）
+  - **BL-AUDIT-002（致命）**：`_finalize_run` 在暂停时不再把状态覆盖为"已完成"。
+  - **BL-AUDIT-001（高）**：批量 consumer_exp 暂停时跳过 sleep 加速排空。
+  - **BL-AUDIT-003（高）**：批量队列容量去掉 1000 下限，queue_output 从 2 倍改为 1 倍。
+  - **BL-AUDIT-004（高）**：saveResult_thread 加 daemon=True。
+  - **BL-AUDIT-005（高）**：结果事件 Redis 不可用时直接走 spool 文件，不再做内存 fallback。
+  - **BL-AUDIT-006（高）**：_relation_buffer batch_size 从 500 降到 100。
+  - **BL-AUDIT-007（高）**：确认 _trim_stream maxlen 已改为 100。
+  - **BL-AUDIT-011（中）**：清理 batch_exp_task/auto_scan_task 中 status="2"（停止）死代码及测试。
+  - **BL-AUDIT-008（中）**：dirscan HTTP 响应后增加暂停检查点，最长延迟从 ~60s 压到 ~10s。
+  - **BL-AUDIT-009（中）**：dirscan POC 异常不再静默，改为 traceback + logger.exception。
+  - **BL-AUDIT-010（低）**：dirscan TTL 下限从 3600 改为 7200（2 小时）。
+  - **BL-AUDIT-013（中）**：引擎 API 分页循环：返回 < page_size 正常结束，连续 3 次去重后新增=0 抛异常退出。
+- **自动扫描 EXP 队列缩小**：`queue_EXP_input`/`queue_EXP_result` 从 1000 改为 `exp_worker_count*2`。
+- **暂停加速**：`exp_consumer` 暂停时跳过 `sleep_time`，漏洞验证不再有人工间隔；`phase=2` 改为 EXP 线程启动时立即设置，不再等生产者完成。
+- **自动扫描漏洞插件过滤前置**：`_build_fingerprint_exp_cache()` 构建缓存时排除 `severity="info"` 的插件，删除了 `exp_consumer()` 中原来的按目标查 DB 过滤逻辑。
+- **Redis Stream 裁剪值缩小**：`_trim_stream` maxlen 从 5000 降到 100，节省内存。
+- **目录扫描 TTL 下限调整**：`compute_ttl` 下限从 3600s 改为 7200s（2 小时）。
+- **Mode R 技能改造**：审计流程改为"产出待处理清单 → 逐条与用户确认"，每条必须含场景举例。
+- **执行器检测删除后自停**：自动扫描和批量任务的 `check_stop_bridge()` 和 `check_pause_signal()` 在 DB 行被删后调 `kill_task()` 退出。
+- **删除级联清理**：三个任务类型的删除接口统一改为：运行中先发 stop 信号等执行器退出 → 清 .merged/ 合并文件 → 删 AssetTaskRelation → 删孤立资产（剩余引用为 0 才删）→ 保留漏洞结果 → 输入文件不删（留给文件管理页）。
+## 2026-06-05
+- **自动扫描漏洞插件过滤前置**：`_build_fingerprint_exp_cache()` 构建缓存时排除 `severity="info"` 的插件（版本探测、面板识别等非漏洞模板），不再对每个目标做额外 DB 查询。`exp_consumer()` 删除了原有的按目标查 DB 过滤逻辑。
+- **插件列表页标题可点击跳转编辑**：表格列太多时"编辑"按钮可能被遮挡，标题现在是可点击链接（新标签页打开），文字颜色保持黑色。
+- **插件调试页下拉框边框修复**：修复"类型"和"语言"下拉框边框比同表单输入框更粗的问题，统一为 1px。
+- **任务表单英文字段翻译为中文**：批量任务和自动扫描任务新建表单中，输入源类型（from file→从文件上传等）、运行模式（thread→多线程等）、引擎代理模式（follow engine config→跟随引擎配置等）、漏洞扫描（yes/no→是/否）全部翻译为中文。
+- **文件上传按钮美化**：批量任务和自动扫描任务的"目标文件"上传，从原生 `<input type="file">` 改为 antd Button + 文件名显示。
+- **历史上传文件端点共享**：新增 `/api/v1/history-files` 共享端点，批量任务和自动扫描任务的"从历史上传文件"使用同一个接口和目录（`EXP_input/`），两边上传的文件可以互相使用。
+- **批量任务历史文件接口补漏**：新增 `/api/v1/batch-tasks/history-files` 路由和视图（此前 404），修复历史上传文件获取失败。
+- **自动扫描任务轮询补全 `queued` 字段**：轮询接口 `status-batch` 返回 `queued`，前端"排队中"标签随 Worker 领取任务后自动消失，不再需要刷新页面。
+- **空间测绘引擎数据复用收口**：统一自动扫描与批量任务的行为——启动强制拉取，续跑强制复用，重跑由用户勾选决定。重跑弹窗新增"复用已有引擎数据"复选框（仅 `input_type=4` 时显示）。自动扫描 `task_detail_api` 修复 `can_reuse_engine_data` 硬编码为 False 的 bug。
+- **测绘引擎最大拉取数量移至 settings**：`ENGINE_MAX_FETCH_ASSETS = 10000`（原硬编码 5000），用户可在 settings.py 自行调整。
+## 2026-06-04
+- **指纹调试页双阶段跳转匹配**：首次请求显式 follow_redirects=False 捕获 HTTP 302 响应，手动跟随 Location 拿到落地页；落地页检测 JS 跳转并采集目标页。匹配引擎抽到共享模块 fingerprint_matcher.py。前端用 Tabs 标签页展示初次响应/跳转目标，面外保留资产特征。修复 matched_text 误判导致的"命中却显示未命中"bug。
+- **插件调试页多项体验修复**：修复 debug trace 信息不在页面显示（后端 matched 与 status 解耦）；移除无用 isEditMode 状态；保存后自动选中插件可立即测试；目标URL/cmd输入框加宽；执行结果按命中/未命中显示绿/红色；修复插件选择器文字垂直未居中（兼容 antd 6.x）。
+- **测绘引擎页面排版优化**：使用代理开关与代理选择框合并到同一行；侧边栏菜单禁止鼠标拖动选中文字。
+- **指纹调试页优化**：移除冗余的指纹搜索输入框（Select 自带搜索）；响应头补齐状态码（HTTP/1.1 200）。
+- **列表页间距修整**：react-list-header 与搜索栏增加下边距。
+- **修复 EXP.creat_time 时区警告**：datetime.now() 改为 timezone.now()。
+- **Nuclei 引擎新增 ssl-cert 提取器**：支持从 HTTPS 响应中提取 TLS 证书字段（`subject_cn`/`subject_dn`/`issuer_cn`/`issuer_dn`/`fingerprint_hash`/`cipher` 等 13 个字段），对齐 Nuclei 官方 ssl extractor 语义。仅当模板包含 `type: ssl-cert` 或 `type: ssl` 提取器且目标为 HTTPS 时才拉取证书，普通模板零额外开销。
+- **修复批量任务协程模式暂停失效**：`ProcessTaskKiller` 缺少 `pause_requested` / `stop_requested` 属性，导致 gevent 子进程的暂停状态无法回传到 Celery 包装层，`_run_batch_scan_task` 判定终态永远走 `"success"` 分支，CAS 将状态写成完成（status=1）+ 进度 100%。新增 `multiprocessing.Value` 共享变量在父子进程间回传暂停/停止状态；`run_gevent_task_in_subprocess` 子进程退出前写入状态；`Task_handler.run()` finally 块去掉 `dispatch_token is None` 条件作为 CAS 路径兜底。
+- **修复批量任务代理 HTTPS 请求的 SSLSocket TypeError**：gevent monkey patch 的 `ssl=False` 导致 urllib3 在代理 CONNECT 隧道 + SSL 包装时 socket 类型不匹配，触发 `TypeError: _wrap_socket() argument 'sock' must be _socket.socket, not SSLSocket`。改为 `ssl=True` 并修复 urllib3 `ssl_` 模块的 SSLContext 引用防止 TLS setter 递归。同步加固 `_build_proxy_from_setting` 的代理 scheme 映射和 `hook_request.py` 的 conf.proxies 原地修改问题。
+## 2026-06-03（晚）
+- **删除旧 Django 页面，前端完全独立**：删除了 80+ 条旧 Django HTML 页面路由（渲染模板的）、27 个模板文件（仅保留 `login.html`）、`react_shell.py`（Nginx 已直接提供 React 壳页）。React 前端中所有 `legacyListUrl` prop、"回旧版"链接、`legacy_list_url` 类型字段全部清理。
+- **旧版数据接口统一迁移到 `/api/v1/*`**：10 条遗留数据接口（`/result_List/get_plugin`、`/result_delete`、`/result_download`、`/auto_exp_result/delete`、`/auto_exp_result/download`、`/asset/facet`、`/asset/port_overview_more`、`/asset/export`、`/identify_result/<id>/html`、`/identify_result/<id>/vuln-result`）全部迁到 `/api/v1/*` 下统一管理。另有 3 条遗漏的数据接口（`/getPluginInfo`、`/targetRunVerify`、`/Identify_task_Result/download`）同步补齐。
+- **字典 CRUD 补充 API**：新增 `/api/v1/dicts` 的 create/detail/update/delete 四个接口，React DictListPage 不再调用旧 `/dict/*` 路径。
+- **导出任务下载修复**：`/export/tasks/<id>/download` 误删后补回为 `/api/v1/export-tasks/<id>/download`，同步更新 API 返回的 `download_url` 字段。
+- **直连 Django 时 React 壳页兜底**：新增 `_serve_react_shell` 视图，直接读取 Vite 构建的 `index.html` 返回。开发/无 Nginx 环境下直连 Django 端口也能正常访问 React 页面。
+- **Nginx 配置修复**：`/react-shell/assets/` 的 location 规则加 `try_files $uri /react-shell/index.html` 兜底，修复 `/react-shell/assets/search` 等 BrowserRouter 路由被当作静态文件导致的 404。
+- **批量任务代理保存修复**：`BatchTaskListPage` 的 `submitAddForm` 中 `if (v)` 过滤改为 `if (v || v === 0 || v === false)`，确保值为 0 或 false 时也能正确发送到后端。
+## 2026-06-03（早）
+- **引入 Nginx 统一路径前缀**：Vite base 统一为 `/react-shell/`，移除 `import.meta.env.DEV` 条件判断（App.tsx/SidebarLayout.tsx）。开发/生产路径一致，不再有 basename 来回切换的问题。部署配置写入 `deploy/nginx/react-shell.conf`，部署文档写入 `deploy/nginx/README.md`。
+- **插件列表新增编辑按钮**：操作列加"编辑"链接，点击跳转到插件调试页（`/react-shell/exp-debug?plugin_id=<id>`），自动加载插件代码和表单数据进行编辑。复用调试页已有的 CodeMirror 编辑器 + 表单 + 保存闭环，无需新建编辑页面。
+## 2026-06-02
+- **后台页面 UI 现代化改造**：全局 CSS 设计 tokens 重写 — 品牌蓝 #2563eb→#3366ff、暖灰→冷灰、阴影 2 级→5 级层级、语义色全面升级（success/warning/danger/info）；引入 Plus Jakarta Sans 字体（Google Fonts，4 个字重）；antd 6.x ConfigProvider 细化覆盖 Table/Menu/Button/Card/Input/Select 组件；主按钮 hover 上浮效果 + 彩色阴影；表格标题行大写风格优化；菜单项选中态高亮；新增页面入场动画（淡入+上移6px）；body 极淡噪点纹理；暗色主题同步重整（GitHub 暗色风格）。Vite build ✓/Django check ✓。
+- **前端 API 请求层统一收口**：20 个页面 ~65 处裸 `fetch()` 全部迁移到 `src/api/client.ts` 封装方法（`get`/`post`/`postForm`/`postFormBlob`）。新增 `postForm`（FormData multipart，浏览器自动设 Content-Type boundary）和 `postFormBlob`（返回原始 Response 供 blob 下载）两个方法。删除 3 处重复的 CSRF cookie 读取函数。所有操作/删除/表单提交函数补上 `.catch()` / `try-catch` 错误处理，防止 API 返回 `status:false` 时产生 unhandled rejection。TypeScript 零错误。
+- **任务配置窗口显示已上传文件名**：自动扫描和批量任务的编辑表单，当输入类型为"上传文件"时，展示当前配置的目标文件名。后端 `task_detail_api`（auto_scan）补充 `target` 字段查询，`batch_exp_task.detail` 不再丢弃 `target` 字段。
+- **目录扫描新增休眠时间参数**：`DirScanTask` 模型增加 `sleep_time`（SmallInteger，默认 0），表单加入"休眠时间(秒)"输入框，worker 每次 HTTP 请求后 `asyncio.sleep(sleep_time)` 控制扫描速率。
+- **前端项目规范文档适配**：将通用前端规范（shadcn/ui + Tailwind + react-query + Zustand）改写为项目实际技术栈版本（antd 5.x + 自定义 CSS + SWR + 手动 fetch），目录结构、命名规则、导出约定、请求模式均对齐 20 个已存在的 React 页面真实编码风格。
+- **任务状态轮询 SWR 收口**：后端新增 3 个 batch 状态接口（`/api/v1/*/status-batch?ids=`），一次请求取所有运行中任务状态，替代 N 个任务 N 个请求的模式。前端安装 SWR，创建 `useTaskPolling` 公共 hook，三个任务列表页（自动扫描/批量任务/目录扫描）删除手写 `setInterval` 轮询代码，改用 hook 统一管理。SWR 自动处理标签页隐藏暂停、重复请求合并。
+- **React 前端性能优化（Vercel Best Practices）**：`GlobalAssetSearchPage` 380 行内联 CSS 提升到模块级常量（消除每次渲染重建）；派生状态 `useMemo` 包裹；antd Button 桶导入改为路径导入 `antd/es/button`；`BatchTaskListPage` / `AutoScanTaskListPage` 的 `columns` 数组 `useMemo` 包裹（减少不必要的 antd Table 重渲染）。
+- **API 401 自动跳转登录**：`client.ts` 拦截 401 响应统一跳转 `/login?next=...`，修复 session 过期后页面卡在加载中的问题。
+- **React StrictMode mountedRef 修复**：3 个列表页（代理/引擎/指纹）的 `mountedRef` 从 `useRef(true)` 改为 `useEffect` 体内初始化，修复 React 18 StrictMode 双挂载导致 `mountedRef` 永久为 `false`、页面永远显示"正在加载..."的问题。
+- **目录扫描暂停/停止双通道信号**：DirScanTask 新增 `pause_requested`/`stop_requested` 字段（对齐自动扫描和批量任务模式），API 层暂停/停止改用 DB 标志 + Redis 信号双通道，Worker 主循环和 Phase 2/3 加入暂停/停止检查，暂停中可续跑（进度保留在 Redis），修复 `action="2"` 路由冲突 bug，僵尸回收区分暂停中（恢复为已暂停）和运行中失联（设为已停止），状态轮询 API 返回 `pausing` 过渡态。
+- **目录扫描 Phase 2 漏洞验证改造**：从"只写空关联记录"改为真正执行漏洞验证 — 预加载产品→EXP 缓存 → 生产者线程遍历目录结果 → N 个消费者线程加载 POC 并调用 `call_runtime_method(exp, "verify", target)` 执行验证 → 写入线程通过事件流管道（`build_auto_exp_event_payload` + `publish_result_events`）异步写入 `auto_scan_exp_result` 表，`result` 字段有实际验证输出。并发数由 `vuln_thread_num` 配置。
+- **批量任务 EXP 条件筛选后端修复**：`_build_severity_q` / `_build_tag_q` 兼容 React 前端数组格式，不再崩溃。
+- **批量任务 UI 修复**：进度去重 + 运行模式/选择模式中文标签。
+- **资产检索页对齐旧版**：快导按钮、移动端侧边栏、翻页半透明加载、精确总数前端缓存。
+- **同IP端口详情页 Tag 视觉统一** + **指纹编辑弹窗加宽** + **Vite 开发模式独立运行**。
+## 2026-06-01
+- **资产检索页对齐旧版设计**：单任务结果页加回"快导"按钮（一键下载 CSV，不弹窗选字段）；移动端 1024px 以下加侧边栏浮层切换按钮；翻页加载改为旧版半透明叠加方式（保留旧结果 + opacity 0.4 + 中部 loading 提示，不再替换为空白加载页）；前端缓存首页精确匹配数，翻页后不再显示"约 xx 条"。
+- **同IP端口详情页 Tag 视觉统一**：漏洞列和目录扫描列"无"从灰色文字改为无色 Tag，与有效值 Tag 保持一致的单元格视觉重量。
+- **批量任务进度去重**：进度列去掉多余的 `span` 百分比文字，只保留 Progress 组件自带的百分比显示。
+- **批量任务列表中文标签**："运行模式"列显示"多线程/协程"替代数字；"选择模式"列显示"手动选择/按条件筛选"替代数字。
+- **批量任务条件筛选 EXP 修复**：`_build_severity_q` / `_build_tag_q` 兼容前端 React 发送的数组格式（`["critical","high"]`），修复危害等级/标签筛选有值时因格式不匹配崩溃的问题。同时保留对旧 Django 模板 dict 格式的兼容。
+- **指纹编辑弹窗加宽**：Modal 宽度 720px，匹配条件 TextArea 跨两列展开，避免长条件换行。
+- **Vite 开发模式独立运行**：新增 `frontend/index.html` 入口页，去掉 `/react-shell` 代理规则，Vite dev server(5173) 可独立托管 React 应用并支持 HMR 热更新。
+- **批量任务表单整改**：React 新增/编辑表单补齐缺失字段 — exp_select_mode（手动选择/按条件筛选切换）、插件多选下拉（搜索+全量列表）、按条件筛选面板（危害等级/筛选逻辑/标签三列并排）、task_type（Verify/Attact）+ cmd_input。后端 choices API 新增 plugins/severity_choices/tag_choices/task_type_choices 返回。编辑时 EXP 字段不再因 React 表单未提交 plugin 而被清空。
+- **批量任务/目录扫描/自动扫描操作按钮修复**：`openOperateModal` 缺少 `setSubmitting(false)`，导致 `submitting` 状态在多个 Modal 间串扰时操作确认按钮卡在 loading 状态无法点击。
+- **批量任务重启/续跑后端修复**：`status=resume` 未匹配任何分支导致续跑失败；空 EXP 字段（React 编辑遗留）导致 `resolve_exp_ids` 返回 None 报"EXP has been delete!"，现空 EXP 等同于全选；filter mode 任务改用完整 task_obj 判断模式跳过 EXP 校验；`exp_detail` 空 EXP 不再崩溃。
+- **目录扫描任务停止修复**：后端 `dirscan_task_manage.py` 停止操作接受 `status='2'`（此前只认 `'3'`/`'stop'`），并修复 `("resume","resume")` / `("rerun","rerun")` 冗余元组。
+- **start_celery.sh 修复**：启动前清理旧同名 worker 防止冲突；`%h` 改为显式 `hostname`；新增日志 10MB 自动 rotate。
+## 2026-05-31
+- **新增同 IP 端口详情页**：端口概览标题旁新增"同IP端口详情"按钮，点击在新标签页打开完整资产详情表（antd Table + expandable），展示协议/端口/URL/产品/标题/状态码/证书主体/证书组织/漏洞数量/目录扫描数量。每行可展开查看漏洞列表（插件名/CVE/产品）和目录扫描子表（路径/状态码/标题/产品）。新增 `GET /api/v1/ip-detail?ip=X` 后端 API（一次批量查询资产+AssetTaskRelation+漏洞+目录扫描）。新增独立 React 页面 `IpPortDetailPage`（路由 `/react-shell/ip-detail`）。tsc/build/check 全过。
+- **修复端口概览同 IP 同端口重复展示**：`build_port_overview` 去重 key 从 `(protocol, port, target)` 改为 `(protocol, port)`，同一 IP 下每个协议+端口只出现一条，重复行合并产品列表并更新 `is_current` 标记。
+- **修复自动扫描任务创建表单字段名校验失败**：前端 `AutoScanTaskListPage` 提交 FormData 时 `vulnerability_scanning`（小写）与 Django ModelForm 字段 `Vulnerability_scanning`（大写 V）不匹配，导致 `Vulnerability_scanning: "This field is required."`。改为 `Vulnerability_scanning` 匹配后端。tsc/build 全过。
+- **修复 product facet 带搜索条件时崩溃**：`build_facet_result` 中 product facet 的 UNION ALL 嵌入了两次 `queryset.query.sql_with_params()` 的 `sql` 子查询（分别 unnest `products` 和 `dir_products`），但 `cursor.execute()` 只传了一份 `params`。queryset 带搜索词时带 `%s` 占位符，驱动解析到第二段 `{sql}` 时参数已耗尽 → `IndexError: tuple index out of range`。修复：`doubled_params = [*params, *params]` 匹配两次出现。
+- **自动扫描/批量任务编辑 React 化 + 单任务结果页独立化**：自动扫描和批量任务编辑从旧 Django 页改为 React Modal（加载 detail API 回填，提交到 update API）；批量任务结果链接改为 React 漏洞结果页（新增 task_id 过滤支持）；新增 `TaskResultStandalone` 薄封装，单任务结果页复用 `GlobalAssetSearchPage`；任务结果路由移出 SidebarLayout，独立全屏渲染；API 返回 `task_name` 字段，顶部标题动态显示任务名；修复 facet 硬编码 `/asset/facet` 的 bug——提取 `facetBaseUrl` 从 `contract.facet_endpoint` 读取，单任务页现在走任务专用 facet 接口。build/tsc/check 全过。
+- **资产检索：端口概览 + 产品搜索 + facet 合并 dir_products**：端口概览产品展示合并 `products` + `dir_products` 去重排序；产品搜索 `product:"xxx"` 同时匹配两个字段（OR 查询走 GIN 索引）；product facet UNION ALL 两表 unnest 再 SUM 合并。新增 4 个索引支撑千万级检索：`dir_products` GIN、`cert_common_name` B-tree、`uri_path` B-tree、`title` B-tree。check 全过。
+- **字典管理 React CRUD + 目录扫描完善 + 后端修复**：字典列表页从只读升级为完整 CRUD（新增/编辑 Modal、字典名+所属组 checkbox+路径 textarea、删除确认）；目录扫描任务页补全编辑功能（加载任务详情回填、补全描述/代理下拉/字典多选/检索语句/源任务多选，按输入模式动态显示相关字段，列表新增开始时间列）。后端修复：dirscan worker 修复 `product__iexact` → `fingerprint_id__product__iexact` 跨表查询错误；目录扫描漏洞阶段排除 severity=info PoC；Phase 3 完成后补充 status=4 更新防止任务卡在"清理中"；API 返回 finished 状态时 phase_label 改为"已完成"。资产检索展开/收起全部同步清空手动展开状态。build/tsc/check 全过。
+- **11 个列表页新增跳页功能**：插件列表、漏洞利用结果、自动扫描漏洞结果、自动扫描任务、批量任务、目录扫描、导出任务、字典列表、测绘引擎、指纹列表、代理设置、字典组管理共 11 个页面全部加上页码跳转（antd Pagination 的加 showQuickJumper，手写分页的加输入框+跳转按钮）。自动扫描结果页标题改为"自动扫描漏洞结果"（侧边栏同步）；漏洞利用结果"任务类型"列宽 70→90px。build/tsc 全过。
+- **资产检索页多项修复与优化**：资产检索改为独立页面（新标签页打开，不包管理后台侧边栏）；端口概览"查看同 IP 其他资产"修复（去掉自动预加载，点击才加载，过滤 is_current 行消除重复）；翻页超出上限改为自动截断到最后页（不再显示加载失败）；4 列详情布局调整（响应头 280px、端口概览 flex:1.3、端口行左侧自适应宽度）；漏洞卡片"查看结果"按钮固定不随文本变形（flex-shrink:0）；URI 路径点击可检索；插件调试页类型下拉补全 12 号选项并强制类型转换。build/tsc 全过。
+- **资产检索页 React 完全重写**：`GlobalAssetSearchPage` 从仅有 60% 功能的骨架版完全重写，逐一对齐原版 Django 模板（`auto_scan_identify_result_standalone.html`）的全部交互和视觉。补全：16 个可折叠 facet 维度（原仅 6 个 Dropdown 选择）、favicon 快捷筛选条（含延迟加载+更多）、Grid 结果行（IP 含复制/跳转按钮+toggle tooltip、协议 chip、端口 chip、标题含状态码+URI+证书）、4 列展开详情（基础信息+国旗+端口概览含可点击产品 chip+复制/跳转按钮+同 IP 懒加载、漏洞卡片含 CVE chip+查看结果弹窗、响应头 pre 块）、展开/收起全部切换、导出 CSV 弹窗（19 字段勾选+条数限制+CSRF+漏洞联动）、完整分页（页码+跳页+±10 页+每页 5/10/13/100/1000 条）、Top bar 匹配计数 pill。样式完全复用原版暖色调 DM Sans/Spectral 字体。build/tsc/check 全过。
+- **全站设计系统重建 + 指纹调试页增强 + 插件详情页 React 化**：设计系统全面重建 — 字号5级（H1/H2/H3/正文/辅助文字）、间距5档（4/8/16/24/32px）、暖灰阶系统、10px统一圆角、2层阴影、低饱和配色，支持明暗双主题（`[data-theme="dark"]` + antd `darkAlgorithm`），侧边栏新增主题切换按钮。卡片去视觉重量（无边框/阴影/背景），Content 背景与 Header 同色，内容填满可用宽度。指纹调试页补齐旧版功能：指纹搜索+Select选择器（只搜产品名、选中回填规则、显示总数与"仅展示前200条"提示）、状态指示器、正则/请求错误独立展示、命中指纹点击回填。指纹列表页编辑窗改为 Modal 弹出。插件详情页（`/react-shell/plugins/:id`）React 化：信息表+POC代码+复制按钮。插件调试页左列加宽至580px、支持方法改为Dropdown+Checkbox多选。指纹调试 API `list()` 与 Python 内置 `list` 名字冲突修复。Vite 代理补全17条旧版 Django 路径。新增 `npm run watch` 自动编译模式。
+- **React 接管侧边栏 + 鉴权**：React 不再嵌入 Django `index.html` 模板，改为独立壳页（`react_shell_standalone.html`）+ `SidebarLayout` 组件（antd Layout+Sider+Menu 侧边栏 + 顶部导航栏）。未登录自动跳 `/login?next=`，登录后回跳原页面。AuthMiddleware + BasicAuthMiddleware 放行 `/react-shell/*` 路径，鉴权收口到 React AuthGuard。Vite 代理覆盖 api/react-shell/login/logout/static 全部转发 Django。旧 Django 模板（index.html、24 个 expload/ 页面、react_shell.html）全部保留，旧页面鉴权逻辑不变。
+- **React 前端架构收口**：3788 行单体 `main.tsx` 拆分为标准 React 项目结构（36 文件），接入 antd 5.x + react-router-dom。类型按模块拆分到 `types/`，API 客户端统一封装 CSRF/错误处理，每个页面独立文件 + 路由懒加载。Vite 自动代码拆分生效（每页独立 chunk）。Django 侧新增 `/react-shell/<path:subpath>` catch-all 配合 BrowserRouter 深链接。旧 `main.tsx` 保留在 git 历史中可回退。
+- **调试工作台线 React 化（BL-FE-110~111）**：插件调试页接入 CodeMirror 6（`@uiw/react-codemirror`），覆盖插件选择/代码编辑（Python/YAML）/表单字段/调试执行/结果展示/保存闭环；指纹调试页接入 CodeMirror 6（HTML高亮），覆盖 URL/代理/规则编辑（含已有指纹 datalist 模糊回填）/全库匹配开关/响应头/正文/匹配结果/命中指纹/资产特征展示。新增 6 个 `/api/v1/*` JSON 端点 + 2 个 `/react-shell/*` 路由。侧边栏入口已切。JS 888 KB（含 CodeMirror ~640 KB）。build / check / 14 tests 全过。
+- **阶段十三完成：剩余 6 个后台页面全部 React 化（BL-FE-104~109）**：自动扫描结果页（列表/多维筛选/批量删除/CSV下载）、字典组管理页（CRUD闭环）、ceye配置页（单表单）、导出任务页（只读列表+下载）、漏洞利用结果页（列表/多维筛选/批量删除/CSV下载/结果展开/验证弹窗5种操作类型）、仪表盘（4统计卡片+2个CSS柱状图）。新增 6 个 `/api/v1/*` 端点 + 6 个 `/react-shell/*` 路由。16 个页面 React 化全部完成。14 tests / build / check 全过。旧页面全部保留为回退。
+- **前后端分离项目收口完成**：20 个后台页面全部 React 化，侧边栏入口全部切到新路径，旧页面保留为回退。全部 backlog（50 项）验收完成。build / check / 14 tests 全过。详见 `docs/项目控制台.md`。
+- **阶段十二：调试工作台线**：原评估结论为"不做 React 迁移"（旧页面功能完整稳定）；后于同日完成 React 迁移（见上条）。
+- **阶段十一：目录扫描页 React 化**：新增 `/api/v1/dirscan-tasks` 系列 7 个端点（列表/详情/轮询/创建/更新/操作/删除），React `DirscanTaskListPage`（9列表格/状态/阶段/进度/3秒轮询/操作弹窗/新增表单/删除确认）。字典/任务选择等高级配置暂走旧页编辑。侧边栏"扫描任务"入口已切到 `/react-shell/dirscan-tasks`。验证通过 build/tsc/check/14 tests。
+- **阶段十：批量任务页 React 化**：新增 `/api/v1/batch-tasks` 系列 10 个端点（列表/详情/轮询/选项/插件/EXP详情/创建/更新/操作/删除），React `BatchTaskListPage`（8列表格/状态标签/进度条/3秒轮询/EXP详情抽屉/操作弹窗/删除确认/新增表单）。插件选择/过滤模式等高级配置暂走旧页编辑。侧边栏"批量任务执行"入口已切到 `/react-shell/batch-tasks`。验证通过 build/tsc/check/32 tests。
+- **阶段九：自动扫描任务页 React 化**：新增 `/api/v1/identify-tasks` 系列 11 个端点（列表/详情/轮询/选项/历史文件/创建/更新/操作/删除/批量删除），React `AutoScanTaskListPage`（8列表格/6种状态标签/进度条/3秒智能轮询/操作弹窗/删除确认/新增表单带5种输入源动态切换）。侧边栏"自动扫描任务"入口已切到 `/react-shell/identify-tasks`。验收 13 项测试全过，78 tests OK。
+- **阶段八：结果展示线 React 化完成**：BL-FE-101 standalone 结果页 React 化（搜索/facet/分页/列表/详情展开）、BL-FE-102 全局资产检索页 React 化（复用结果卡片/facet/分页/详情展开骨架）、BL-FE-103 结果详情附属能力收口（HTML原文查看新标签页打开、漏洞结果弹窗、端口概览懒加载）。侧边栏"资产检索"入口已切到 `/react-shell/assets/search`。验收 18 项测试 + 50 tests OK。
+- **前后端分离方案 A：BL-FE-101 standalone 结果页 React 第一版收口完成**：新增 React 壳页入口 `/react-shell/identify-tasks/<uid>/results`，自动扫描任务列表中的独立窗口结果入口已切到该新路径；前端第一版 `TaskResultsPage` 已接通任务内搜索、facet 点击筛选、分页（上一页/下一页/每页条数）、结果列表和详情展开主链路，但不替换旧 `/Identify_task/<uid>/result/standalone` 模板入口。另补充 3 类更贴近验收的对照证据：task 结果 API 与旧 standalone JSON 对照、task facet API 与旧 facet 对照、`rows_per_page` 白名单参数生效。HTML 原文查看、漏洞结果查看、端口概览懒加载继续留到 `BL-FE-103`。验证通过 `npm --prefix frontend run build`、`npm --prefix frontend exec -- tsc --noEmit -p /workspaces/cybersparker/frontend/tsconfig.json`、`python manage.py test app_cybersparker.tests.ReactShellIntegrationTests app_cybersparker.tests.AutoScanResultSearchTests --keepdb`、`python manage.py check`。
+- **前后端分离方案 A：阶段七本地验收通过**：已按阶段范围复核 `BL-FE-001` ~ `BL-FE-006`，并统一补跑 `npm --prefix frontend run build`、阶段七 47 条定向测试、`python manage.py check`、`pyright app_cybersparker/views/react_shell.py app_cybersparker/views/expload/task_manage/auto_scan_result.py app_cybersparker/tests.py cybersparker/urls.py`。同时把 BL-FE-003 与 BL-FE-005 的验收文案收紧到真实交付范围：BL-FE-003 以 5 个只读列表样板为准，不再写入未实现的字典组列表；BL-FE-005 以 3 个中风险表单页的详情回填/新增/编辑/校验/错误提示闭环为准，不再把本阶段未交付的删除动作算进验收条件。
+- **前后端分离方案 A：BL-FE-006 高风险页面二期评估完成**：已对自动扫描任务页、批量任务页、目录扫描页、插件调试页、指纹调试页、全局资产检索页、standalone 结果页 7 类高风险页面完成二期盘点，补齐了路由/视图/模板/旧接口依赖、主状态链和拆分顺序。结论是：下一期应优先推进结果展示线（standalone 结果页 + 全局资产检索页），再做任务控制线（先自动扫描任务页，再批量任务页/目录扫描页），最后再做插件调试页和指纹调试页这类调试工作台。验证通过 `python manage.py check`。
+- **前后端分离方案 A：BL-FE-004 结果页 JSON 契约正式化**：在前一轮固定 `GET /api/v1/identify-tasks/<uid>/results`、`GET /api/v1/assets/search`、`GET /api/v1/identify-tasks/<uid>/facets`、`GET /api/v1/assets/facets` 包装入口的基础上，本轮继续把 task/global 两条结果列表 JSON 分支收口到同一 helper。现在在保留旧顶层 `results` / `estimated_total` / `exact_total` / `favicon_*` 字段的同时，显式补充 `contract_version`、`contract`、`query`、`pagination`、`favicon_facet`，并把 detail/facet 依赖入口改成通过 Django 路由反解生成，避免后续改 URL 时契约静默漂移。另补 3 类定向验证：task JSON 契约、global JSON 契约、旧 `/asset/search` HTML 冒烟页，确保旧模板 UI 不退化。验证通过 `python manage.py test app_cybersparker.tests.AutoScanResultSearchTests --keepdb`、`python manage.py check`、`pyright app_cybersparker/views/expload/task_manage/auto_scan_result.py app_cybersparker/tests.py cybersparker/urls.py`。
+- **前后端分离方案 A：BL-FE-005 指纹表单闭环打通**：在只读指纹列表样板基础上新增受保护写接口 `GET /api/v1/fingerprints/<id>`、`POST /api/v1/fingerprints/create`、`POST /api/v1/fingerprints/<id>/update`，统一走同源 cookie + `X-CSRFToken`。React 指纹页已支持详情回填、新增、编辑、错误提示和提交后刷新列表；旧 `fingerprint_List` 页面行为保持不变。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.FingerprintFormApiTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright cybersparker/urls.py app_cybersparker/tests.py`。
+- **前后端分离方案 A：BL-FE-005 测绘引擎表单闭环打通**：在只读引擎列表样板基础上新增受保护写接口 `GET /api/v1/cyberspace-engines/<id>`、`POST /api/v1/cyberspace-engines/create`、`POST /api/v1/cyberspace-engines/<id>/update`，统一走同源 cookie + `X-CSRFToken`。React 引擎页已支持详情回填、新增、编辑、错误提示和提交后刷新列表；旧 `cyberspace_engine_setting` 页面行为保持不变。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.EngineFormApiTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright cybersparker/urls.py app_cybersparker/tests.py`。
+- **前后端分离方案 A：BL-FE-005 代理设置表单闭环打通**：在只读代理列表样板基础上新增受保护写接口 `GET /api/v1/proxies/<id>`、`POST /api/v1/proxies/create`、`POST /api/v1/proxies/<id>/update`，统一走同源 cookie + `X-CSRFToken`。React 代理页已支持详情回填、新增、编辑、错误提示和提交后刷新列表；旧 `proxy_setting` 页面行为保持不变，保存后仍触发 `refresh_conf_from_db()`。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.ProxyFormApiTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright cybersparker/urls.py app_cybersparker/tests.py`。
+- **前后端分离方案 A：BL-FE-003 指纹列表样板打通**：在前四个样板基础上新增 `GET /api/v1/fingerprints` 只读指纹列表 API，支持 `q`、`page`、`rows_per_page` 参数；新增 `/react-shell/fingerprints` Django 壳页入口，React 页面已支持指纹列表、搜索、分页和“回旧版列表”入口。旧 `fingerprint_List` 页面行为保持不变。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.FingerprintListApiTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright cybersparker/urls.py app_cybersparker/tests.py`。
+- **前后端分离方案 A：BL-FE-003 测绘引擎列表样板打通**：在前三个样板基础上新增 `GET /api/v1/cyberspace-engines` 只读测绘引擎列表 API，支持 `q`、`page`、`rows_per_page` 参数；新增 `/react-shell/engines` Django 壳页入口，React 页面已支持引擎列表、搜索、分页和“回旧版列表”入口。旧 `cyberspace_engine_setting` 页面行为保持不变。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.EngineListApiTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright cybersparker/urls.py app_cybersparker/tests.py`。
+- **前后端分离方案 A：BL-FE-003 代理列表样板打通**：在前两个样板基础上新增 `GET /api/v1/proxies` 只读代理列表 API，支持 `q`、`page`、`rows_per_page` 参数；新增 `/react-shell/proxies` Django 壳页入口，React 页面已支持代理列表、搜索、分页和“回旧版列表”入口。旧 `proxy_setting` 页面行为保持不变。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.ProxyListApiTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright cybersparker/urls.py app_cybersparker/tests.py`。
+- **前后端分离方案 A：BL-FE-003 字典列表样板打通**：在插件列表样板基础上新增 `GET /api/v1/dicts` 只读字典列表 API，支持 `q`、`page`、`rows_per_page` 参数；新增 `/react-shell/dicts` Django 壳页入口，React 页面已支持字典列表、搜索、分页和“回旧版列表”入口。旧 `dict/list` 页面行为保持不变。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.DictListApiTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright cybersparker/urls.py app_cybersparker/tests.py`。
+- **前后端分离方案 A：BL-FE-003 插件列表样板打通**：在 React 基线之上新增 `GET /api/v1/plugins` 只读插件列表 API，支持 `q`、`severity`、`tag`、`page`、`rows_per_page` 参数；新增 `/react-shell/plugins` Django 壳页入口，React 页面已支持插件列表、筛选、分页和“回旧版列表”入口。旧 `expload/list` 页面行为保持不变。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.PluginListApiTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright app_cybersparker/tests.py cybersparker/urls.py`。
+- **前后端分离方案 A：BL-FE-002 完成**：新增 `frontend/` React + Vite + TypeScript 最小工程，构建产物稳定输出到 `app_cybersparker/static/react-shell/`；新增 Django 壳页视图 `app_cybersparker/views/react_shell.py`、模板 `app_cybersparker/templates/project/react_shell.html` 和路由 `/react-shell`，空壳页已挂入 React 根节点并接通 `GET /api/v1/auth/session` 会话探针。验证通过 `npm --prefix frontend run build`、`python manage.py test app_cybersparker.tests.AuthContractTests app_cybersparker.tests.ReactShellIntegrationTests --keepdb`、`python manage.py check`、`pyright app_cybersparker/tests.py cybersparker/urls.py`。同步更新 `docs/backlog/08-前后端分离改造.md`、`plans/2026-05-30-BL-FE-002-React基线接入与壳页挂载.md` 和项目控制台。
+- **前后端分离方案 A：BL-FE-001 完成**：在控制面规划基础上，补齐首批 React 接入所需的最小后端契约收口。新增 `GET /api/v1/auth/session` 会话探针；`AuthMiddleware` 对 `/api/v1/**` 统一未登录返回 `401 JSON`，非 API 页面仍跳 `/login`；补注册 `/logout` 路由；`BasicAuthMiddleware` 对 `/login`、`/logout` 放行，并在 session 已存在时不再重复发起 BasicAuth challenge，避免 React 壳页被反拦截。补 5 条 `AuthContractTests` 定向测试并通过 `python manage.py test app_cybersparker.tests.AuthContractTests --keepdb` 与 `python manage.py check`。同步更新 `docs/modules/08-前后端分离模块.md`、`docs/backlog/08-前后端分离改造.md`、`plans/2026-05-30-BL-FE-001-鉴权-CSRF-API-契约冻结.md` 和项目控制台。
+- **前后端分离方案 A 控制面规划**：新增 `docs/modules/08-前后端分离模块.md`、`docs/backlog/08-前后端分离改造.md`、`plans/2026-05-30-前后端分离改造方案A.md`，确定采用“Django 主链路不动、React 逐页替换”的迁移路线。首批聚焦鉴权/CSRF/API 契约冻结、React 基线接入、Django 壳页挂载和低风险列表页迁移；结果页先抽接口不换 UI，任务页/调试页/资产检索页进入二期评估。同步更新项目控制台、模块总览和开发文档索引。
+- **官方 Nuclei OOB 模板兼容修复**：不修改官方模板，直接增强运行时兼容层。`nuclei_runtime_engine.py` 现在会把官方模板常见的 `{{interactsh-url}}` / `{{ceye_url}}` 都统一映射到现有 ceye 链路；同时对 `generate_java_gadget(..., 'hex') + \r\n` 这类 network payload 做保守的自动字节化，避免把 Java 反序列化 payload 当普通文本发出去。另把 URLDNS 构造从手写 Java 序列化改为复用脚本内置的匿名成功样本字节，按新的 DNSLog 地址定点替换 host/full URL 与长度字段，确保生成结果与已验证成功的 payload 结构一致，同时不依赖本地外部文件或泄漏真实 ceye 域名。补 5 条兼容回归测试，覆盖 OOB 变量别名、官方 Log4j 模板 payload 二进制发送、真实官方模板经 ceye 命中、普通 hex-like 文本不误判、URLDNS 成功样本复用。详见 `plans/2026-05-30-nuclei-oob-template-compat.md`。
+- **自动扫描 `set()` 名字冲突修复**：自动扫描漏洞消费线程在执行 `severity=info` 过滤时，原本想把查询结果转成集合，但 `auto_exp_task.py` 里把 `cybersparker.settings` 起名成了 `set`，实际调用成模块，线程直接报 `'module' object is not callable`。现已将该文件内 settings 别名统一改为 `app_settings`，消除与 Python 内置 `set()` 的冲突；新增 1 条定向回归测试，覆盖 `exp_consumer()` 命中过滤分支后仍能继续入队高危模板结果。详见 `plans/2026-05-30-auto-scan-set-shadowing-fix.md`。
+- **Nuclei 不支持协议模板清理与导入过滤**：确认当前 Nuclei YAML 运行时只支持 `http/requests` 与 `tcp/network` 两类协议块；`code/javascript/headless/file/dns/ssl/websocket/whois` 顶层协议块统一视为当前不支持。新增统一协议识别函数，`import_nuclei_templates` 导入时会直接跳过这类模板并输出按协议统计；新增 `cleanup_nuclei_unsupported_templates` 管理命令，可清理历史库中的不支持模板、删除 `EXP_plugin/` 下对应 YAML 文件，并同步剔除 `batch_EXPTask.EXP` 里的悬空模板 id。补 3 条定向测试覆盖协议识别、导入跳过、历史清理。新增说明文档 `docs/nuclei-协议支持边界与模板清理.md`，记录各协议含义、为什么当前不支持、以及本次决策口径。详见 `plans/2026-05-29-nuclei-unsupported-template-cleanup.md`。
+- **批量任务结果页 `rows_per_page` 切换报错修复**：此前 `/batch_exploadTask/<id>/result?page=&rows_per_page=20` 这类请求会把 `rows_per_page` 误当成搜索字段拼进 ORM 过滤条件，直接抛 `FieldError: Cannot resolve keyword 'rows_per_page' into field`。现改为把 `rows_per_page` 和 `page/per_page` 一样视为分页参数，不再进入 `search_dict`。新增 1 条定向回归测试覆盖结果页切换每页条数场景。详见 `plans/2026-05-29-batch-result-rows-per-page-fix.md`。
+- **批量任务跳过不支持的 Nuclei `code` 协议**：此前批量任务执行 Nuclei YAML 插件时，YAML 包装层对 `protocol=code` 这类当前不支持的模板会返回 `matched=false` + `result="unsupported nuclei protocol: code"`；自动扫描会先跳过，但批量任务仍把这类结果直接塞进结果队列，最后页面显示“成功验证”，数据库里却是错误文字。现改为批量任务 `consumer_exp()` 只跳过 `RuntimeMethodResult` 且 `matched=false` 的 YAML 返回，不再参与结果入库；正常命中的 YAML 结果仍入队，python3 普通 dict 结果也不受影响。新增 3 条定向回归测试覆盖“不支持协议跳过”“正常命中仍入队”“python3 普通 dict 不误伤”。详见 `plans/2026-05-29-batch-nuclei-code-protocol-skip.md`。
+- **批量任务“重新获取数据”启动链路修复**：此前批量任务 `input_type=4` 虽然能在编辑页保存 `reuse_engine_data=false`，但第二次启动/重跑时 `prepare_engine_target_before_start()` 只看旧 target TXT 是否存在，导致明明选了“重新获取”，实际仍直接复用旧 TXT。现改为在 `operate()` → `run_batch_scan_task()` → `_run_batch_scan_task()` → `startTask()` → `prepare_engine_target_before_start()` 全链路显式透传 `force_refresh_engine`；启动/重跑会按已保存配置决定是否删旧文件并重新调用空间测绘引擎，`resume` 续跑则保持原目标文件不重拉。新增 5 条定向回归测试覆盖重跑强制刷新、worker 透传、resume 不重拉、强制刷新删旧取新、非强制时继续复用。详见 `plans/2026-05-29-batch-engine-force-refresh-fix.md`。
+- **批量任务检索语句/引擎切换后强制重抓修复**：此前批量任务编辑 `input_type=4` 任务时，后端用同一个任务实例同时承接“旧查询语句”和表单新值；等表单校验把新 `engine_query` 写回实例后，再去比较旧值时，读到的其实也已经是新值，所以即使用户把 `app="nginx"` 改成 `app="apache"`，系统仍会误判成“查询没变”，把上一次抓到的 TXT 继续复用。另一个边界是：如果用户把 `engine_type` 从 `fofa` 切到 `hunter`，查询字符串刚好一样，系统也会继续误复用旧 TXT。现改为在 `form.is_valid()` 前先快照旧 `engine_type`、旧 `engine_query` 和旧 `target`，复用判断收紧为“同引擎 + 同查询 + 旧文件还在”才允许继续复用；只要查询变了，或引擎切了，就强制把 `reuse_engine_data` 落成 false 且清空 `target`，等待下次启动/重跑重新调用空间测绘引擎抓新数据。新增 3 条请求级回归测试分别覆盖“改查询强制失效”“同查询继续复用”“切引擎强制失效”。详见 `plans/2026-05-29-batch-engine-query-change-refresh-fix.md`。
+- **自动扫描任务检索语句/引擎切换后强制重抓修复**：自动扫描任务 `input_type=4` 的编辑保存链路此前也有同样问题：`resolve_target_source()` 直接读取会被表单覆盖的旧实例字段，导致“查询改了”被误判成“没变”，或在引擎从 `fofa` 切到 `hunter` 但查询字符串相同时继续复用上一轮抓到的 TXT。现改为在 `edit()` 中于 `form.is_valid()` 前先快照旧 `engine_type`、旧 `engine_query`、旧 `target`，复用条件同样收紧为“同引擎 + 同查询 + 旧文件还在”；只要查询变化或引擎切换，就强制清空旧 target，等待下次启动/重跑重新抓取。新增 3 条请求级回归测试覆盖“改查询失效 / 同查询继续复用 / 切引擎失效”。另外检查了目录扫描任务，它当前没有直接从空间测绘引擎抓取并复用旧 target 文件的配置，因此未发现同类问题，也没有改代码。详见 `plans/2026-05-29-auto-scan-engine-reuse-fix.md`。
+- **空间测绘引擎目标提取统一改为 URL 优先**：Fofa / ZoomEye / Quake / Hunter / Shodan 之前大量只保留 `ip:port`，会把不同域名站点错误合并成同一目标，像 Quake 查询命中 75 条却因本地去重只剩 21 条。现统一改为提取顺序：`URL > 域名/主机名+端口 > IP+端口`，优先保留完整协议、主机名、端口与路径；仅在缺少 URL/域名信息时才退回到 IP。保留 `[engine-fetch]` 和 `[quake-adapter]` 日志，直接打印原始返回数量、样本、去重前后数量。新增 5 条回归测试覆盖 Fofa / ZoomEye / Quake / Hunter / Shodan 的优先级行为。详见 `plans/2026-05-29-cyberspace-engine-url-priority.md`。
+- **Nuclei OOB 模板命中修复**：修复 `run_nuclei_template()` 对依赖 DNS 回连的模板判定过早失败的问题。此前像 `Apache Log4j Server - Deserialization Command Execution` 这类模板，会先在 matcher 阶段检查 `part: interactsh_protocol`，但当前上下文里这个字段始终为空；而 ceye 查询又只在“已经命中”后才执行，形成死循环，导致本地 `192.168.1.166:4712` 这类可连通靶机也始终返回失败。现改为：仅当模板的 matcher/extractor 真的用到 `interactsh_*` 字段时，先查询 ceye 记录，再把 `interactsh_protocol/interactsh_request/interactsh_response/dnslog` 注入当前匹配上下文；普通 HTTP 模板不会额外查 ceye。
+  同时补齐两处此前仍会让 Log4j 模板失败的缺口：一是函数参数里的内层 `{{interactsh-url}}` 现在会先展开再参与外层表达式求值，不再报 `name 'interactsh' is not defined`；二是 network OOB 模板在目标无即时回包时，不再因为 `recv` 超时而在查 ceye 前提前失败。
+  另外修复插件调试页的假成功判定：YAML 包装层 `_verify()` 现在显式返回 `matched` 字段，`debug_execute` 优先按 `matched` 判断成功/失败，避免把端口解析异常这类非空错误字符串误显示成“验证成功”。同时修正 ceye 收口逻辑：只有模板请求块的 matcher/extractor 实际引用 `interactsh_*` 字段时，命中后才查询 ceye；普通 HTTP/TCP 模板即使命中也不会再额外轮询 DNSLog。
+  并修复批量任务 YAML 命中结果被静默丢弃的问题：`batch_task_executor.consumer_exp()` / `save_TaskResult()` 之前用 `type(result) == type({})` 严格判断，无法接受 `RuntimeMethodResult(dict 子类)`，导致批量任务明明跑完并命中了，也不会入成果队列，前端只看到 100% 但结果为空。现统一改为 `isinstance(result, dict)`，并新增 `[batch-result]` 日志，打印命中/未命中与入队摘要。详见 `plans/2026-05-28-log4j-nuclei-probe.md`。
+- **批量任务暂停状态 + 续跑补齐**：`batch_EXPTask` 新增 `pause_requested` 和 `status=4(pause)`，批量任务支持优雅暂停：暂停后停止读取新目标，队列中已进入的目标处理完再落为已暂停；已暂停和已停止且有进度的任务都可续跑。列表页新增暂停按钮、暂停中/已暂停文案。同步修复 stop 信号延迟退出问题：同一目标进入插件循环后也会再次检查 stop signal，避免点击停止后当前目标剩余插件继续跑完。
+- **project-control-plane 技能补强**：新增只读审计模式 Mode R，用于“检查最近提交/按设计核对/只出报告不改代码”的场景；固定审计结果分类为“已确认代码问题 / 测试滞后 / 文档不一致 / 证据不足”，并增加“审计 → 修复队列”过渡规则、closeout 中本轮问题/历史问题分层，以及最小文档同步矩阵。
+- **最近4天缺陷回补（导出/检索语句任务/详情接口）**：修复资产导出仍读取已删除 `item.task_id` 导致导出漏洞列直接报错的问题，改为通过 `AssetTaskRelation` 取任务归属后再关联漏洞结果；修复 auto_scan / batch 的 `input_type=6` 在重跑/重启时未清 `last_id` 导致任务直接空跑的问题；batch 检索语句模式的进度总数和已完成数改为按冻结范围统计；auto_scan 详情接口补回 `search_query/parsed_query/frozen_max_id/last_id`，编辑已有检索语句任务时前后端一致。
+- **阶段六筛选执行链路修复**：批量任务 exp_select_mode=2（按条件筛选）的 severity/tags 筛选配置保存正常但执行时从未被读取——operate() 的 .values() 缺字段、startTask() 的 data dict 未传递、resolve_exp_ids() 不认筛选模式导致 EXP 为空时报"EXP has been delete!"、task_result() 对空 EXP 拆分出空串导致 500。修复：补齐全链路字段传递，筛选模式跳过 EXP 校验，结果页按过滤条件动态查插件。检索语句模式的进度 total_line_count 之前写死为 1 导致进度只有 0% 和 100%，改为查匹配资产数。
+- **标签"全部"用 "*" 标记替代遍历**：批量任务表单标签下拉的"全部"复选框之前遍历 select.options[i].selected 设置 8000+ 个 option，页面卡死。改为 selected_Tags = ["*"] 标记，buildFilterConfig 序列化为 tag_filter.values 中的 "*"，后端 _build_tag_q() 识别该标记返回 None（不限制标签）。下拉选项无搜索时限制 100 个。
+- **Nuclei 引擎 Go 风格内联正则标志适配**：Python 3.11 的 re 模块不允许 (?i)/(?m)/(?s) 出现在表达式中间（Go 的 regexp 允许），如 EZAK(?i)[a-z0-9]{54} 抛 "global flags not at the start"。加 _safe_re_search()：遇到该错误时将内联标志转为 (?flags:...) 局部组包裹受影响部分，保留原始语义（标志前的内容不受影响）。_match_regex / _extract_regex 均改用此函数。影响 15 个 Nuclei 模板，10 个随机抽样 Probe 测试 20/20 通过。
+- **Nuclei raw HTTP 请求 @Host 指令解析修复**：`_build_http_call_from_raw` 未能识别 Nuclei 模板中 `@Host:` 等 `@` 前缀指令，导致 `@Host:` 被误当作 HTTP method 传给 `requests`，报 `ValueError: Method cannot contain non-token characters`。修复：解析原始请求行前，按 token 遍历跳过所有非 HTTP method 的 `@` 指令前缀（`@timeout` / `@Host` / `@tls-sni` / `@once` / `@note` 等），找到第一个合法 HTTP method 作为请求行起点。同时移除已被新逻辑覆盖的旧 `@timeout` 局部处理。
+- **三种任务新增"从检索语句导入"输入源**：自动扫描、目录扫描、批量漏洞任务均可使用资产检索页面的查询语法（如 `body="后台" AND product="nginx"`）圈定目标资产作为任务输入。任务创建时执行查询并冻结结果，执行期通过 keyset 分页遍历。匹配为 0 或语法错误时拒绝创建。编辑检索语句后自动停止旧任务并重置状态。查询解析器收口到 `app_cybersparker/services/asset_search_parser.py`，统一供资产检索页和三处任务消费。
+  - DirScanTask `source_all` 字段改为 `input_mode` 三选一（手动选任务 / 全选 / 检索语句），含数据迁移。
+  - 新增 `search_query` / `parsed_query` / `frozen_max_id` / `last_id` 字段到 `auto_scan_tasks`、`batch_EXPTask`、`DirScanTask`（migration 0041）。
+- **批量任务支持按任务独立代理**：`batch_EXPTask` 新增 `proxy` FK（可选），批量任务创建表单增加代理选择。执行时 `run()` 按任务设置 `conf.proxies`，`_finalize_run()` 恢复。不选代理则清空 `conf.proxies`（不走代理），与自动扫描/目录扫描一样支持每任务独立代理。
+- **Nuclei flow 指令支持**：`run_nuclei_template` 现在解析模板的 `flow` 字段。`flow: http(1) && http(2)` 进入 AND 模式——所有含 matchers 的请求块必须全部通过才算命中；无 matchers 的提取型请求仅执行 extractor 不参与判定。无 flow 或 `||` 保持原有 OR 模式（首个命中即返回）。同时修复 `_apply_matchers` 空 matchers 返回值 `True`→`False`。
+- **资产检索 * 通配符**：全局检索和单任务结果页均支持 `field:"*"` 语法，表示搜索该字段不为空的所有资产。如 `vuln:"*"` = 存在任意漏洞的资产、`cert:"*"` = 有证书信息的资产、`product:"*"` = 识别出产品的资产。所有字段均支持此语法，向后兼容。新增 `_build_not_null_query()` 和 `build_related_exp_exists()` 辅助函数。
+- **自动扫描 Nuclei 结果提取与存储格式修复**：YAML 插件的验证结果通过 `str(result)` 把整个 `_verify` 包装 dict 存入了 DB（如 `{'target': '...', 'result': "[...]"}`），导致结果页和调试页显示 Python repr 垃圾格式。改为提取 `result.get("result", "")` 只存 nuclei 引擎实际输出。同步修复 `exp_debug.py` 调试页面的展示逻辑。
+- **自动扫描 Nuclei YAML 插件误报修复**：`auto_exp_task.py` 漏洞验证阶段，Python3 插件有 `if not result: continue` 跳过空结果，但 Nuclei YAML 分支缺少此检查。Nuclei 模板未匹配时 `_verify` 返回 `{}`（空 dict），`str({})` = `"{}"` 被当作有效验证结果写入 `auto_scan_exp_result` 表，导致结果页出现大量假漏洞。修复：将空结果检查提到插件语言分支之前，两个路径统一跳过。
+- **插件调试页 Nuclei YAML 调试报错修复**：`debug_execute` 原先用 `split("]")[1]` 从 `[CVE] Title` 格式解析插件标题，Nuclei YAML 插件 CVE 常为空（`[] Title`），split 后取到空字符串导致 `"plugin not found"`。改为前后端统一传插件 ID：`get_debug_plugin_queryset` 返回 `id` 字段，`debug_getExpInfo`/`debug_execute`/`expload_save` 优先用 `plugin_id` 查库，旧标题解析逻辑保留为兼容回退；前端下拉项增加 `data-plugin-id` 属性，选中/调试/保存时均传 ID。
+- **dj_db_conn_pool test runner 安全修复**：`dj_db_conn_pool` 连接池不跟随 Django test runner 切换数据库（`settings_dict['NAME']` 改了但 SQLAlchemy 池里连接还指向主库），导致 `manage.py test` 把主库 `cybersparker` 的表 DROP+CREATE 并清空全部业务数据。新增 `SafeTestRunner`（`app_cybersparker/test_runner.py`），测试期间自动切换为 `django.db.backends.postgresql` 原生后端，测试后恢复。`settings.py` 注册 `TEST_RUNNER`。nuclei 运行时引擎 5 项修复：`_safe_eval_expression` AST 沙箱加固（阻断 dunder 逃逸）、`_read_payload_file_lines` 路径遍历防护（白名单目录）、`_match_regex` 支持 `{{}}` 模板表达式、`_match_binary` 无效 hex 日志告警、`_extract_regex` group 索引可读性提升。详见 `docs/dj_db_conn_pool_test清库问题.md`。
+- **Nuclei 漏洞验证引擎增强（ceye DNSLog + helper 函数 + JSON/XPath + cookie 复用）**：新增 ceye.io DNSLog 配置页面（后台 DNSLog 配置），支持 Nuclei 模板 `{{ceye_url}}` 变量自动替换为 ceye 子域名，`{{interactsh-url}}` 暂降级为 `{{ceye_url}}` 处理。模板执行匹配后自动 poll ceye API 获取 DNS 记录附加到结果。引擎 B 补齐 `url_encode`/`sha256`/`gzip`/`replace`/`trim`/`join`/`rand_int`/`date_time`/`unix_time` 等 15 个高频 helper 函数（从 20 个增至 35 个）。新增 JSON extractor（jq 风格路径 `.key.sub[0].field`）、XPath matcher/extractor（`//title/text()`、`//a/@href` 等）。同模板内多个 HTTP request 块共用 `requests.Session()`，支持 cookie 自动跨请求传递。
+- **代理设置新增 SOCKS5 协议支持**：`ProxySetting` 模型新增 `socks5` 协议类型，代理设置页面标题从"HTTP代理设置"改为"代理设置"。新增 `PySocks` 和 `aiohttp-socks` 依赖，让 requests monkey patch、空间测绘引擎 API、自动扫描和目录扫描四条出站请求路径都支持 SOCKS5 代理。
+- **修复资产检索页首屏端口概览不加载**：单任务独立结果页 + 全局资产检索页首次加载时服务端渲染未填充 `port_overview` 字段，导致端口概览始终显示"暂无端口概览"。新增 `_attach_port_overview()` 共享 helper，两个视图 HTML 路径统一调用。`_result_items.html` 按钮文案改为"查看同 IP 其他资产"，无漏洞时隐藏"受影响漏洞"列。同步更新 `docs/modules/00-资产检索与目录扫描设计.md`、`docs/modules/04-结果管理模块.md`、`docs/当前实现总览.md`。优化 `project-control-plane` skill closeout 规则和 Mode D-lite 步骤中的模块文档同步检查。
+- **Nuclei 模板批量导入管理命令**：`python manage.py import_nuclei_templates` 从 nuclei-templates 仓库批量导入 YAML POC 模板。支持 `--dry-run`/`--limit`/`--skip-matching`/`--sync-mode`。三阶段匹配：B1 metadata.product 精确/包含（高置信度）、B2 CVE 继承（高置信度）、B3 tags+name 关键词（中置信度）。100+ 通用词过滤、模板名 skip 检查、反向包含≥5字符、每模板同指纹去重。1000 模板实测：95.2% 匹配、4.0 绑定/模板、10s 完成、0 解析失败。
+- **YAML 运行时去中间文件重构**：去掉 `compile_yaml_to_project_poc()` 编译缓存层（`__yaml_runtime__/*.py`），改为从 YAML 直接调 `run_nuclei_template()`。`poc_runtime_resolver.py` 删减 50 行（移除 `_build_yaml_runtime_source`、`compile_yaml_to_project_poc`、`YAML_RUNTIME_ROOT` 及相关 import），新增 `_build_yaml_wrapper()` 返回 SimpleNamespace 包装对象。8 个调用方（调试/单任务/批量/自动扫描/结果复验/跨平台）零改动。清理 `EXP_plugin/__yaml_runtime__/` 目录（14 个缓存文件）。
+- **指纹匹配引擎 mmh3 favicon hash 支持**：`_fetch_favicon_async` 增加 mmh3 hash 计算（MurmurHash3 32-bit），新增 `favicon_mmh3` 上下文规则键，支持 `=`、`~=`、`!=` 操作符；调试页、扫描引擎、识别器三处同步生效。mmh3 值仅匹配时临时计算，不持久化 DB。
+- **check_rule != 操作符补充**：`title`/`body`/`header` 新增 `!=`（不等于）操作符支持，修复 fingerprint_indentify.py 中 != 分支永远执行不到的排序 bug（!= 检查放在 = 之前）。
+- **指纹批量导入命令**：`python manage.py import_fingerprints` 从 fingerprint.txt 批量导入 28,700 条指纹，自动映射键名（Body→body, Header→header, Title→title, Cert→cert, Bodyr→body~=, Icon→favicon_mmh3=），自动跳过 Protocol/Port/Hash/Response 规则，支持 `--dry-run`/`--limit`/`--sample` 参数。
+- **EXP 模板 severity + tags 分类与任务过滤**：EXP 表新增 `severity`（5 级危害等级 + 空，加索引）+ `tags`（M2M 独立 Tag 表，加索引）。Nuclei 模板导入时自动从 YAML `info` 提取 severity 和 tags。已有 12,922 条数据通过 `python manage.py backfill_exp_metadata` 回填。后台 EXP 列表页新增危害等级和标签列。批量漏洞任务新增"按筛选条件选 EXP"模式——用户可设 severity（include/exclude）+ tags（include/exclude）+ AND/OR 逻辑关系，不设筛选时默认排除 severity=info 的探测类模板。自动扫描漏洞验证阶段新增硬过滤：指纹匹配出的 EXP 中自动跳过 severity=info。详见 `plans/2026-05-27-EXP-severity-tags分类与任务过滤.md`。
+- **资产表 task_id 改为多对多关系表**：`auto_scan_indentify_result` 的 `task_id` 字段从单值改为多对多关系表 `AssetTaskRelation`，一个资产被多个任务扫描后每个任务都能在自己的结果页查到。写入路径改用 `bulk_create(ignore_conflicts=True)` 批量写入（500 条/批），替代逐条 get_or_create。所有按 task_id 查资产的查询（standalone、chart、导出、资产检索、目录扫描、漏洞关联）改为 JOIN/EXISTS 通过关系表关联。`auto_scan_exp_result` 的 `(task_id, target)` 复合索引已就位。详见 `plans/2026-05-27-资产表task_id改为多对多关系表.md`。
+- **插件调试页 Nuclei YAML 模板示例**：`plugin_language` 选择 `nuclei_yaml` 时编辑器自动切换为 YAML 模式并填入 Nuclei 模板示例（POST 请求、`@timeout` 超时、regex+word 双 matcher `and` 关系、`extractors` 提取 auth_token 和 full_body）；切回 `python3` 恢复 Python 模板和语法高亮。加载已有插件时编辑器模式自动匹配插件语言。
+- **资产检索页异步导出功能**：将无效的"字段"按钮替换为"导出CSV"按钮。弹窗支持 19 个字段多选（含漏洞名称、CVE编号），勾选漏洞名称时自动追加漏洞验证结果列；导出条数可限制（1–50000 或全部）。提交后后台 Celery 异步生成 CSV，新增"导出任务"子页面管理历史导出（状态/检索条件/任务类型/下载）。新增 `ExportTask` 模型、`run_export_task` Celery 任务、`asset_export` POST 端点、`export_task_list`/`export_task_download` 视图。
+- **修复资产检索页 AJAX 结果 favicon 图标不显示**：`Task_result` 和 `global_asset_search` 的 JSON 响应中补上 `favicon` 字段（文件路径）。此前首次 HTML 加载可显示图标，但搜索/翻页/筛选后的 AJAX 结果缺少该字段，导致展开 detail 时只有 favicon_md5 哈希文本，图标缺失。
+- **资产检索页游标跳页**：新增页码显示（第 X / Y 页）、跳页输入框（支持回车）、前/后 10 页快捷按钮；后端 Pagination 新增 `jump` 参数，跳页仍走主键索引（`WHERE id < cursor OFFSET N LIMIT`），限制最大跳跃 ±10 页。
+- **搜索语法错误提示**：`global_asset_search` / `Task_result` 语法解析失败时不再容错跳转全量结果，改为返回错误提示（JSON: `{"status":False,"error":"搜索语法解析失败"}`），前端在结果区域显示红色错误信息并保留搜索框输入。
+- **全局资产检索 exact_total**：JSON 响应补上遗漏的 `exact_total` 字段，搜索过滤后页面显示精确匹配条数而非始终 "共约 10,480 条"。
+- **即时 tooltip 修复**：`closest` 调用增加空值保护，修复 SVG/img 子元素触发 mouseenter 时报 `TypeError` 的 bug。
+- **搜索性能全面优化**：新增 `:=` 深度检索（子串模式）vs `:` 分词检索（日常模式）。HTML 搜索三索引并存（trigram 管英文 ILIKE + bigm 管中文 ILIKE + tsvector 管 ASCII 分词搜索）。pg_bigm 1.2 从源码编译安装。header 字段增加 trigram 索引。`auto_scan_result.py` 和 `all_Indentify_result.py` 搜索解析器同步更新。迁移 0036。
+- **HTML 检索语义分流**：`body/html` 统一走 `UPPER(html) LIKE UPPER(...)` 子串检索。tsvector 因 token 2047 字符上限 + tsvector 1MB 总大小上限，不适用于 HTML 长文本，已废弃。`=` / `:` / `:=` 三种分隔符对 body/html 语义等价（均为 ILIKE），保留 `:=` 语法用于未来扩展。`:=` 模式下 standalone / 全局检索页的 favicon facet 从主搜索 JSON 中拆出，首屏不再被 favicon 聚合阻塞。
+- **favicon 图标条带性能优化**：去掉 favicon 聚合查询中无用的 `COUNT(*)` 子查询（前端 `renderFaviconStrip` 不需总数）；`favicon` 字段从 `TextField`（TOAST）改为 `CharField(256)`；GROUP BY 只保留 `favicon_md5`（`favicon` 路径用 `MAX()` 取值，不上 GROUP BY）；`favicon_md5` 建 B-tree 索引，查询走 Bitmap Index Scan 取代 Seq Scan。迁移 0035。
+- **资产检索页面性能优化**（BL-AUTO-014）：JSON 响应移除 favicon Base64 字段（仅保留 favicon_md5）；前端主搜索与聚类统计改为并行请求；消除重复 `data.count()` 和重复 favicon facet 查询；N+1 批量优化（port_overview/related_vulns 从 26 次单独查询合并为 2 次批量查询）；游标分页替代 OFFSET 分页，首页 `COUNT(*) OVER()` 一次 SQL 返回精确总数；端口概览改为纯懒加载（默认只展示当前资产行 + "查看同 IP 其他资产"按钮）；无漏洞时隐藏受影响漏洞列；favicon 采集改为存文件到 `static/favicons/<md5>.<ext>`，DB 只存路径，post_delete 信号级联清理；迁移 0033 添加 `UPPER(html)` GIN 表达式索引；迁移 0034 批量导出已有 base64 favicon 为文件（549 个）。
+- **指纹调试页浅色主题重写**：深色实验室风格改为浅色纸纹主题，去掉了 hero-stats 统计区，卡片重新排序（命中指纹/资产特征提到上方，响应正文移到底部并限高 50vh），响应头 XSS 防御改为 textContent
+- **指纹调试页输入提示补全**：`inputFingerIsTrue` 错误提示补全 cert_org_unit、cert_common_name、cert_serial
+- **检索语法统一**：搜索框同时支持 `:` 和 `=` 分隔符（`favicon="md5"` ≡ `favicon:"md5"`）；新增 `body` 键（等价 `html`）和 `header` 键（响应头模糊匹配 `__icontains`）；两个搜索解析器（`auto_scan_result.py` / `all_Indentify_result.py`）同步更新
+- **指纹调试页全异步增强**（BL-FINGER-005）：`mate()` 改为 `asyncio.run` 并发采集（favicon 爬取 + HTTPS 证书抓取 + JS 跳转检测）；`check_rule()` 扩展 cert/cert_org/favicon/favicon_md5/uri_path 上下文匹配（=、~=、!=）；前端新增网站图标/证书/URI路径展示卡片；生产引擎 `_context_rule_values` 补 `uri_path`，`_build_fingerprint_context` 补 `uri_path`
+- **资产检索左侧统计新增 URI路径**：全局检索和任务结果页侧边栏新增 `uri_path` 聚类统计，展示资产 URI 路径分布（如 `/wui/index.html`、`/login/Login.jsp`）。
+- **资产检索页端口概览渐进式加载**：默认展示前 8 项，有更多时显示"展开更多（共 X 项）"按钮，点击通过 AJAX 分批加载剩余条目（每次 20 条），避免同 IP 下数百条资产一次性渲染导致的性能问题。新增 `port_overview_more` API 端点，`build_port_overview` 调用点改为截断返回 + 元数据标记。
+- **资产检索页打开按钮悬浮提示即时化**：主栏和端口概览中的跳转按钮悬浮提示从原生 `title`（~400ms 延迟）改为 JS 即时 tooltip（`position:fixed` 挂载到 body，避免 Grid 裁剪），显示"打开 <完整URL>"，鼠标移上立即展示。
+- **JS 跳转检测升级为 AST 静态分析 + 正则回退**：`get_js_redirect_url()` 优先用 esprima 解析 `<script>` 语法树，追踪变量/函数定义链提取跳转 URL；失败时回退正则匹配。新增覆盖 location.replace/assign、self/top/document/window.location.href、window.location=、模板字符串、嵌套作用域变量。
+- **资产检索页 uri_path 始终展示**：折叠栏显示 `chip-uri` 紫色 tag（有值时），展开详情基础信息中 URI路径行始终可见（无值显示"—"），不再条件隐藏。
+- **修复 `django.setup()` 导致 migrate 报错 `populate() isn't reentrant`**：移除 `dirscan_engine.py` 顶部多余的 `django.setup()`，该调用在 `AppConfig.ready()` → `_recover_zombie_tasks()` → `import cleanup_task_redis` 链路上触发 Django 二次初始化。
+- **资产检索 `uri_path` 搜索支持**：`uri_path:"/admin"` 精确匹配、`uri_path:"/admin*"` 通配符模糊匹配，`!uri_path` 反选。全局检索页和 standalone 结果页均已支持。
+- **字典管理所属组下拉多选组件重设计**：M2M `<select multiple>` 替换为自定义多选下拉组件（tag 标签 + 对勾动画 + 搜索/移除交互），视觉风格统一为 indigo 色调。
+- **目录扫描暂停续跑 + 崩溃回收 + Redis 泄漏修复**：
+  - 暂停后恢复时 `DirScanPool.recover()` 被调用，从 Redis 恢复未扫完 host 的 offset/counter 进池，`progress_done` 从 DB 取值不再硬编码为 0。
+  - 扫描循环中每 100 次迭代更新 `heartbeat_at`，确保心跳不超时。
+  - 提取 `cleanup_task_redis(task_id)` 独立函数，在暂停→停止、重跑、启动三个操作中防御性清理 Redis 残留 key。
+  - Django 启动僵尸回收 `_recover_zombie_tasks()` 增加 `DirScanTask` 覆盖：status=1 + heartbeat 过期 → status=3 + Redis 清理。
+- **资产检索国家国旗图标修复与地区展示合并**：
+  - `country` 字段部分存中文名（"中国"）部分存 ISO 代码，新增 `_country_code()` 映射函数统一转为小写 ISO 代码，传递给模板和 JSON API 的 `country_code` 字段。
+  - 国旗 CSS sprite 改用 `country_code` 定位（修复前用中文名 `c-flag--中国` 匹配不到任何规则，图标永远为空）。
+  - 地区/省份/城市三行合并为一行 `国家 / 省份 / 城市`，移除已删除字段 `area`/`area_name_zh` 的引用。
+  - 国旗图标 `vertical-align: middle` 对齐修复。目录扫描 Web 阶段接入 JS 跳转识别（`js_redirect.py` 集成到 `_scan_loop`，多跳链跟踪 + 首末指纹 + uri_path 回写根资产）；资产检索页与 standalone 结果页新增 `uri_path` 列展示（collapsed bar + expanded detail + JS renderResults + settings modal checkbox）；同步 6 项已实现但 backlog 标记滞后项的状态（BL-DIRSCAN-005/006/007/008、BL-AUTO-007、BL-RESULT-002）。
+- **资产表重构**：唯一键从 `(task_id, target)` 改为 `(protocol, host, port, uri_path)`；新增 `host`（主机名）、`uri_path`（自动扫描跳转后的最终落地 URI path）字段；删除冗余字段 `area`、`area_name_zh`（与 province 重复）和 `resolved_ip`（ip 已存解析 IP）；`country` 从 18 扩至 64；所有字符串字段入库前截断保护。模型约束和数据写入链路（`save_indentify_to_db`、`build_identify_event_payloads`、`_write_identify_event`）同步更新，writer 改用 `(protocol, host, port, uri_path)` 匹配去重。
+- **纯真 IP 字段与去重**：`auto_scan_indentify_result` 新增 `province`、`city`、`isp` 字段（migration 0022），侧边栏新增省份/城市/运营商聚类；新增 `dedup_by_ip_port` 管理命令，按 `(ip, port)` 去重保留最新记录；历史数据用 `backfill_geo_from_qqwry` 回填地理位置信息。
+- **资产检索页搜索增强**：证书信息可点击搜索；侧边栏新增证书主体/组织/部门聚类；`buildPageUrl` 修复搜索词丢失问题。
+- **Redis Stream 内存治理**：`process_result_stream` 消费后自动 `XTRIM MAXLEN 5000`，修复 Stream 无限堆积导致 6.5GB 内存的问题。
+- **aiohttp 对端 IP 获取修复**：`response._protocol.transport.get_extra_info('peername')` 替代无效的 `response.connection`（aiohttp 3.13 的 ResponseHandler 在 read 后 `__bool__` 返回 False）；域名资产 `ip` 字段自动替换为解析 IP。
+- **目录扫描设计文档**：`docs/modules/00-资产检索与目录扫描设计.md` 包含两表架构、性能策略、目录扫描执行阶段、字典管理、响应截断等完整方案，经 critic 审核确认。
+- **IP 地理位置切换为纯真数据库**：替换 GeoLite2 为纯真 IP 数据库（`db/qqwry.dat`），新建 `app_cybersparker/lib/qqwry.py` 高性能解析器（25MB/152万条记录，二分查找 + GBK 解码，全局单例），支持解析国家/省份/城市/运营商四级信息。新增 `province`、`city`、`isp` 三个数据库字段（migration 0022），侧边栏新增省份/城市/运营商聚类，支持 `province:`/`city:`/`isp:` 搜索语法（icontains）。
+- **域名解析 IP 采集**：自动扫描访问域名时从 aiohttp 连接捕获对端解析 IP，存入新增的 `resolved_ip` 字段（GenericIPAddressField），结果页展示"解析 IP"行，支持 `resolved_ip:"x.x.x.x"` 搜索（icontains + 通配符）。
+- **修复资产检索页证书搜索不可用**：结果中展示的证书信息（组织、主体、序列号）现在可点击直接触发 `cert:` / `cert_serial:` 搜索；侧边栏新增"证书"聚类 facet（按 cert_common_name 聚合）；搜索框 placeholder 补充 `cert:` 语法提示；修复 `buildPageUrl` 未保存搜索词到 URL 导致刷新后搜索条件丢失的问题。
+- **目录扫描模块（阶段三）**：新增字典组/字典管理（DirScanDictGroup、DirScanDict 模型与 CRUD 页面）；根资产唯一键从 4 元组改为 3 元组（protocol, host, port），新增 dir_products ArrayField + GIN 索引；DirScanTask 任务模型与配置页（输入源解析、字典选择、shuffle_file 快照生成）；随机化扫描引擎（文件外部洗牌 + 活跃池随机调度 + Redis 进度持久化 + xxh3_128 去重）；Web 扫描 Phase 1（aiohttp async HTTP、Content-Type 预检、流式截断、指纹识别、directory_result 写入）；JS 跳转识别共享函数（5 类跳转写法）；漏洞扫描 Phase 2（游标分页 + 插件关联查找 + 追加写入）；dir_products 回写 Phase 3；导航栏新增"目录扫描"菜单；Celery dir_scan 专用队列。
+- **漏洞结果追加留存**：`_write_auto_exp_event` 从 upsert 改为 always create，每次验证成功新增记录，保留历史结果。
+- **资产检索页 uri_path**：JSON API 新增 `uri_path` 字段，记录自动扫描跳转后的最终落地 URI path。
+- **自动扫描 JS 跳转识别**：`request_scan()` 集成 `get_js_redirect_url()`，自动跟踪 JS 跳转并写入最终落地页的 `uri_path`；跳转落地页独立指纹识别与结果入库。
+- **批量任务 Attact 模式**：`batch_EXPTask` 新增 `task_type`（Verify/Attact）和 `cmd_input` 字段；消费者按 task_type 选择 verify 或 attact + cmd_input；单任务页面标记"已弃用"。
+- **目录扫描任务运行修复**：Django ORM 不能直接在 asyncio 协程中调用，所有 ORM 操作抽成同步辅助函数通过 `asyncio.to_thread()` 执行；DirScanTask 与 task_state_cas_service 字段名不兼容（`endTime` vs `end_time`），改用直接 ORM 更新做 CAS；HTTP 响应含 NUL 字符导致 PostgreSQL 写入失败，入库前统一 strip `\x00`；修复进度自增 bug（`progress_done` 从快照对象读数永远为 0，改为自增计数器）；`print()` 与 Celery Ctrl+C 信号冲突改用 `logging`。
+- **目录扫描任务操作完善**：任务列表新增启动/暂停/恢复/停止/重跑按钮，`task_operate` 视图支持所有操作；重跑时重新解析输入源生成 shuffle_file 快照；停止或完成后不可编辑重跑，需先停止运行中任务。
+- **目录扫描任务调试日志**：Phase 1/2/3 全阶段输出 `logger.info` 日志（启动参数、池填充、每 20 条进度、指纹命中、写入数量、阶段耗时），可通过 Celery worker 日志监控任务运行状态。
+- **配置页 UI 优化**：下拉勾选组件替换多选 select（输入源选择、字典选择），带全选/清除/完成按钮；表单分区卡片化（基本信息、输入源、字典、扫描参数、漏洞扫描 5 个区域），每项带提示说明，漏洞扫描橙色区分。
+- **资产检索 host 字段**：新增 `host:` 检索语法，搜索 `auto_scan_indentify_result.host`（主机名）；结果页 `ri-ip-text` 区域改为显示 host（优先）或 ip（fallback），展开详情的 IP 行保持不变；API 响应新增 `host` 字段。
+- **导航菜单修复**：目录扫描子页面加载时给父级 `DirScan` 添加 `active` 类，刷新后菜单保持展开。
+- **资产检索页 UI 增强**：
+  - 证书展示精简：两个资产检索结果页的证书信息从显示"组织/组织部门/公用名称"改为只显示"证书主体（CN）"，证书组织名(O)和组织部门(OU)移至每个资产的网站标题右侧，超长文本省略号截断；证书信息悬浮 tooltip 仅在文本溢出时显示。
+  - HTTP 状态码视觉区分：状态码 200 显示 `#eaf0ef` 背景，其他状态码背景透明融入容器。
+  - 漏洞资产 IP 红色高亮：存在关联漏洞的资产 IP 显示为红色（`#dc2626`），便于快速识别有漏洞的资产。
+- **资产检索侧边栏省份/城市/ISP 统计修复与优化**：
+  - 后端 `facet()` / `global_facet()` 白名单补齐 `province`、`city`、`isp`，修复面板始终为空的问题。
+  - 前端 `refreshFacetPanel` 补齐上述三个字段，且改为仅刷新已展开面板（未展开面板不发起请求）。
+  - `parse_condition` 调用统一加 try/except 保护，解析失败返回 400 + 可读错误信息，不再抛 500。
+  - 修复 Django 模板 `{{ search_string }}` 自动 HTML 转义导致 `"` 被替换为 `&quot;`、含引号的搜索语句传入后端解析失败的问题（改用 `json.dumps` + `|safe` + `</` → `<\\/` 防 XSS）。
+  - `auto_scan_indentify_result.task_id` 新增 B-tree 索引，加速所有 per-task 查询。
+- **指纹规则支持 favicon/cert**：`fingerprint_indentify.py` 的 `Identifyner` 现在支持 `favicon`、`favicon_md5`、`cert_org`、`cert_org_unit`、`cert_common_name`、`cert_serial` 等新键，`cert` 组按组织/部门/公用名称任一命中即可；同时修复了 `1&&2&&(3||4)` 分支里参数顺序写反的问题，保留原有 `title/body/header` 规则行为。补充定向测试覆盖新键与旧混合分支。
+- **自动扫描 favicon/证书资产检索增强**：`all_Indentify_result.py` 与 `auto_scan_result.py` 统一支持 `favicon:`、`cert_serial:`、`cert:` 搜索键；全局资产检索页与 standalone 结果页新增 favicon 热门区，首屏展示前 20 个、支持点击按 md5 检索和“更多”继续加载；旧单项目识别结果页也同步补了证书展示与检索兼容。
+- **自动扫描 favicon/证书采集与指纹支持**：`auto_scan_indentify_result` 新增 `favicon` / `favicon_md5` / `cert_org` / `cert_org_unit` / `cert_common_name` / `cert_serial` 字段；`auto_exp_task.py` 采集链路补充低成本 favicon 探测与证书备用采集；`fingerprint_indentify.py` 新增 favicon/cert/cert_serial 规则支持，并修复旧混合条件分支参数顺序错误。百度 HTTPS 现场验证确认证书字段可正常提取。
+- 资产检索与 standalone 结果页左侧聚类统计继续性能优化：每个聚类项展开后首次只异步加载前 40 条，若仍有剩余则显示“更多”按钮继续分批追加；后端 facet 查询同步支持 `offset` 分页返回 `has_more/next_offset`，分类标题右侧数字改为显示总子项数而不是 `40+`。
+- 资产检索与 standalone 结果页左侧聚类统计统一增强：原独立“漏洞统计”并入聚类统计，新增按需异步加载的“漏洞”“CVE”两类 facet；搜索语法新增 `vuln:"漏洞插件名"`，两页共用同一套检索能力，只是数据范围一个局部一个全局。
+- 修正自动扫描 Nuclei 漏洞结果入队位置：不再把 runtime 原始 list/dict 结果直接塞进 `queue_EXP_result`，而是在 `exp_consumer()` 按插件类型先统一成 `{exp_id,target,product,result}` 再入队，避免保存阶段继续因缺少 `target` 报错。
+- 扩展自动扫描漏洞结果格式兼容：`save_exp_result()` 进一步兼容 Nuclei 常见字段 `matched-at/matched_at/template-id/template_id/info/extracted-results`，避免仍因缺少 `target` 键报错。
+- 修复自动扫描漏洞结果保存只兼容 Python POC 格式的问题：新增统一结果归一化，兼容 Nuclei YAML 的 `host/url/matched/detail` 风格返回，避免保存阶段因缺少 `target/result` 字段报错。
+- 新增 `start_celery.sh` 并调整 `docker-compose.yml` 的 worker 命令，将 Celery 日志同步写入 `error_log/celery/worker.log`，同时保留终端输出。
+- 引擎任务重跑"复用引擎数据"生效：点击重跑时弹出选项（默认复用），前端传参 → Celery kwargs 直达执行层 → `prepare_engine_target_before_start` 根据 `force_refresh` 参数决定是否重新拉取。去除 `startTask` 中冗余的二次 `prepare_engine_target_before_start` 调用。
+- HTTP 响应 title 解析改为正则提取，移除 `beautifulsoup4`/`lxml` 依赖，消除 `XMLParsedAsHTMLWarning` 警告。
+- 资产检索页"端口-产品-协议"改为按端口分组展示，同一端口的产品用圆角徽章并排显示；"识别产品"超过 6 个时截断显示"…"。
+- 修复自动扫描指纹识别结果产品列表只保留单个产品：`_write_identify_event()` 更新已存在行时改为先合并已有产品再写入，避免 `.update()` 覆盖历史产品列表。新增多产品合并测试。
+- 为 PostgreSQL 业务库全部 public 表增加 TRUNCATE 保护触发器，统一禁止整表 TRUNCATE，保留 DELETE 可用，防止外部连接再次误清空数据。
+- 修复自动扫描结果写库对 NUL 字符不兼容：识别/漏洞/批量结果入库前统一清理 `\x00`，避免单条脏结果把 result writer 整批卡死并导致任务停在 99%。
+- 修复自动扫描 Celery 路径漏掉测绘输入目标准备：输入来源为网络空间测绘引擎时，worker 启动前会先执行 `prepare_engine_target_before_start()` 生成 target 文件，避免 `target=''` 仍被标记为任务成功完成。
+## 2026-05-24 ~ 2026-05-30
+## 2026-05-23
+- **目录扫描设计文档收口**：`docs/modules/00-资产检索与目录扫描设计.md` 统一收紧目录扫描任务的输入源、`shuffle_file` 定义、`source_all/source_tasks` 优先级、字典组/字典两级选择、`progress_done` 语义、协议维度 Redis key，以及暂停/恢复/停止状态机；并补了两个资产检索页面的 `uri_path` 展示和 JS 跳转、多跳识别规则。另补充漏洞结果表改为追加留存、默认取最新结果的查询约定。此次只改设计文档，没有动实现代码。
+## 2026-05-20
+- **批量任务列表页批量删除确认修复**：`/batch_expload_Task/list` 的批量删除现在会先弹现有 `deleteModal` 确认框，不再直接删除；提交按钮改为显式 `type="button"`，点击处理加了 `preventDefault()` / `stopPropagation()`，关闭弹窗后会清空 `pendingBatchDeleteIds`。补充静态回归测试覆盖按钮类型、点击拦截和隐藏状态清理。
+- **批量任务列表页删除状态收口**：批量任务列表页的批量删除确认框关闭后会清空 `pendingBatchDeleteIds`，避免残留的批删状态串到后续单删/批删确认流程。补充静态回归测试覆盖该状态清理。
+- **插件列表批量删除参数兼容修复**：`/expload/list` 批量删除现在同时兼容前端实际提交的 `uids` 和旧的 `uids[]`，避免选中后误报 `No items selected`。补充回归测试覆盖当前页面提交格式。
+- **批量任务线程/协程 worker 分流**：新增 `batch_scan_gevent` 专用队列和 `worker_gevent`，批量任务 `run_mode=2` 现在投递到独立协程 worker，线程模式继续走 `batch_scan` 主 worker。这样线程模式、协程模式、自动扫描不再共用同一 worker 进程。
+- **批量任务 gevent worker 污染修复**：修复批量任务 `run_mode=2` 在 daemon Celery worker 内直跑 gevent 后，污染同一 worker 进程运行时并导致后续自动扫描线程池报 `gevent.exceptions.LoopExit`。当前仍保留 daemon 主 worker 下的线程模式兜底。
+- **批量任务 gevent HTTPS 递归修复**：修复批量任务 `run_mode=2` 在 Celery worker 中跑 requests/urllib3 HTTPS 请求时触发 `SSLContext.minimum_version` 递归的问题。gevent monkey patch 现在明确跳过 SSL（`ssl=False`），避免 Python 3.11 下再次重写 TLS context setter。
+- **批量任务 Celery gevent 崩溃修复**：修复批量任务 `run_mode=2` 在 Celery worker 中报 `daemonic processes are not allowed to have children`。现在普通 Web 路径仍保留原 gevent 子进程隔离；daemon worker 内则安全降级为线程模式执行，不再二次 `spawn` 子进程。
+- **指纹调试页响应展示修复**：修复指纹调试页使用旧请求头时把部分站点打成 404 的问题，请求头改为更干净的现代浏览器配置；同时不再把非 2xx 响应直接当成请求失败，页面会继续展示真实响应头和响应正文，方便排查指纹规则。
+- **指纹调试页全库匹配结果列表**：指纹调试页新增“是否同时匹配所有库中指纹”勾选框。勾选后，除了当前输入规则，还会把指纹库全部规则一起参与本次识别，并在页面展示所有命中的指纹名字、规则内容和命中片段；当前输入规则命中时固定显示为“当前调试指纹”。同时补上定向测试，并修正旧混合条件分支参数顺序错误，避免全库匹配结果误判。
+- **指纹调试页长正文限高**：当目标返回的 HTML 很长时，响应正文展示框现在会限制最大高度并改为框内滚动，不再把整页直接撑得很长。
+- **自动扫描漏扫线程数配置**：自动扫描任务新增 `vulnerability_thread_num`，HTTP 扫描继续由 `thread_num` 控制 aiohttp 并发，漏洞扫描阶段改为单独按漏扫线程数起 `exp_consumer` 线程；线程资源申请同步改为按“指纹线程 + 漏扫线程”计算。
+- **自动扫描重启僵尸任务回收补漏**：启动恢复逻辑新增兜底回收 `status=2`、`queued=False` 且 `startTime` 为空的脏运行态，避免服务重启后任务 200/201 这类已无执行器的记录长期显示为运行中。补充定向测试覆盖该场景，并额外验证 queued → waiting 的现有状态映射不被误伤。
+- **自动扫描任务批量删除修复**：修复自动扫描任务列表页“批量删除”按钮无效的问题。前端批量操作改为请求正确的 `/Identify_task/delete`，后端补齐 POST 批量删除分支，并兼容 `contents[]` / `contents` 两种数组参数；批量删除时继续复用单条删除的目标文件清理逻辑。另补齐 `@csrf_exempt`，与同目录现有任务管理接口保持一致，避免前端 POST 被 CSRF 中间件拦截。
+- **批量删除确认弹窗**：批量任务列表页与自动扫描任务列表页的“批量删除”改为先弹出现有删除确认框，再由确认按钮发起原来的批量删除请求，防止误操作直接删除多条任务。另同步清理批量任务页重复的 `id="btnConfirmDelete"`，将启动确认按钮改为独立 id，避免后续 JS 误绑到删除确认。
+## 2026-05-19
+- **指纹调试页工作台重做**：在已有模糊选择回填的基础上，指纹调试页改成深色实验台风格，重新组织为输入控制区 + 响应观察区，并增加更明确的状态提示，便于边调规则边看响应。
+- **指纹调试页模糊选择回填**：指纹调试页新增一个可模糊搜索的已有指纹选择器，选中后会把对应 `condition` 直接回填到指纹输入框，方便复用现有规则做匹配测试。
+- **聚类展开状态保持**：修复 standalone 结果页与全局资产检索页左侧聚类统计在翻页、改每页条数、搜索后已展开分组被收起的问题。前端新增展开状态记录，搜索条件变化后会自动恢复已展开分组并重新拉取当前结果集的首批统计数据。
+- **聚类侧栏闪烁修复**：翻页、改每页条数、浏览器前进后退时不再重绘左侧聚类统计面板，只刷新右侧结果列表；搜索条件变化时也不再整块重绘左侧，而是只刷新当前已展开的分组，避免侧栏整体闪一下。
+- **资产详情区重构**：资产检索页与 standalone 结果页删除重复的“识别产品”“开放端口”展示，详情区改为“基础信息 / 端口概览 / 受影响漏洞 / 响应头”。端口概览第一行固定突出当前端口，产品区独立横向滚动；新增受影响漏洞卡片与“查看结果”弹窗，直接查看保存到数据库的漏洞验证结果。
+- **搜索/翻页回顶修复**：资产检索页搜索、翻页、改每页条数后，显式关闭浏览器滚动恢复/锚定并强制回到页面顶部，避免结果区位置被自动下拉一截。
+- **漏洞结果懒加载 + 结果表索引**：受影响漏洞区不再首屏内嵌 `result` 文本，改为点击“查看结果”后请求 `/identify_result/<id>/vuln-result` 再弹窗展示；同时为 `auto_scan_exp_result(task_id, target)` 和 `auto_scan_indentify_result(ip, port)` 增加索引，降低关联查询成本。
+- **测绘历史结果可见性修复**：自动扫描“测绘引擎历史数据”弹窗改为直接汇总 `auto_scan_tasks` 与 `batch_EXPTask` 的历史引擎结果，修复自动扫描任务已有引擎结果但前端列表为空的问题。
+- **复用引擎数据说明**：`reuse_engine_data` 仅在自动扫描 `input_type=4` 的编辑/重跑场景生效，查询语句未变且已有 `engine_assets` 文件存在时复用旧文件，避免重复拉取测绘引擎数据。
+## 2026-05-17
+- **全局资产检索页面**：新增 `/asset/search`，跨任务检索所有已测绘资产。复用独立结果页布局，聚类统计懒加载。左侧导航新增"资产检索"菜单项。
+- **聚类统计懒加载**：独立结果页左侧聚类统计不再在页面加载时遍历全量数据计算，改为用户展开分类时通过 `/Identify_task/<uid>/facet` 接口用 PostgreSQL `GROUP BY` + `COUNT` / `unnest` / `split_part` 聚合返回。
+- **IP 字段通配符搜索**：`ip:"*.domain.com"` 转 `iregex` 精确控制模糊位置，无 `*` 走精确匹配。`ipc:"192.168.1"` 改为 `iregex` 精确匹配 C 段，排除域名误匹配。
+- **统计数字修正**：左侧聚类标题右边数字改为子项分类数量（`len()`）而非计数总和（`sum()`）。
+- **多输入来源 + 未授权跳转**：`auto_scan_tasks` 新增 `input_type` 及配套字段，支持上传文件/历史文件/测绘引擎/引擎历史四种来源。`/` 和未登录访问自动跳转 `/login`。
+- **Bug 修复集合**：`exp_debug` 保存插件中英文判断失效、5 个视图函数 except 块裸 return 导致 500、Django 4.1 `get_or_create`/`update_or_create` 的 `StopIteration` 统一替换为 `filter().first()` + 分支、`title`/`ip`/`protocol` 超长字段截断、结果 writer 投递冷却（5 秒 Redis `SET NX`）、续跑进度条归零、连接池默认从 5 提高到 20、`Task_all_info` 测绘引擎任务 target 为 None 时报错、新增任务状态显示为"未启动"阶段"未开始"。指纹表从 SQLite 导入 5897 条规则。
+- **自动扫描任务阶段显示与操作改进**：新增 `phase` 字段（正在Web扫描/正在漏洞扫描/全部完成），前端实时显示。新增优雅暂停（队列排空后自动停止）、续跑（从 `current_line` 继续）、重跑（从头开始）。状态 `finish/running/stop/pause` 完整流转。
+- **stop/pause 信号改为 Redis 优先**：`check_stop_bridge` 和 `check_pause_signal` 优先查 Redis key（即时、免 DB 连接），DB 仅作每秒一次兜底。解决 50 线程空转耗尽连接池导致任务卡死的问题。
+- **自动扫描固定进度卡住修复**：`fingerpoint_consumer_thread`、`exp_consumer`、`save_exp_result` 不再因下游队列暂时 10 秒无数据就提前退出，只在对应阶段真正排空后才自然结束。修复“进度停在 19.10% 等固定值、Celery 心跳还在但任务不再推进”的停滞问题。
+- **批量任务与自动扫描鲁棒性补强**：自动扫描 `save_exp_result()` 单条异常后不再整线程退出；批量任务 `dispatch_task()` 失败会回滚 queued/running 状态并标记 `failed`；批量结果保存线程对空队列超时改为继续等待，避免晚到结果无人处理。
+- **Celery PostgreSQL 连接失步防御**：worker 子进程启动时显式重置 Django 旧连接并销毁继承的连接池；auto/batch 任务的 DB fallback 查询与 `heartbeat_at` 写回在连接损坏时降级处理，避免单个坏连接直接炸线程。
+- **服务重启僵尸任务自动回收**：`AppConfig.ready()` 启动时只回收心跳过期且已 claim 的 `status=2` 任务，不再一刀切停止所有运行中任务，避免误伤仍在执行或排队中的 Celery 自动扫描/批量任务。
+- **result writer 数据库容错修复**：`run_result_writer_task` 入口增加 `close_old_connections()` 清理旧连接，`process_result_stream()` 将 `DatabaseError` 纳入可重试数据库故障分支；写库失败事件不再直接炸 worker，而是保留 pending 等待后续重试。
+- **result writer backlog drain 修复**：`run_result_writer_task` 单次执行不再只处理一小批结果事件，而是循环 drain 到本轮 `processed=0` 才退出。修复“自动扫描任务已产出识别事件，但结果页因 backlog 长时间堆积而显示空白”的问题。
+- **HTTP 请求超时可配置**：`auto_scan_tasks` 新增 `http_timeout` 字段（默认 10s），替换硬编码的 `total=None`。解决慢服务器 dribble 数据导致 `network_concurrency` 槽位永久占满、进度条卡在 99% 的问题。
+- **`update_or_create` → `get_or_create` + 手动 update**：Django 4.1 的 `select_for_update()` 在空结果集时抛 `RuntimeError: generator raised StopIteration`，三处全替换。
+- **current_line 定期落库**：producer 每次写进度时同步写 `current_line`，避免意外崩溃后进度丢失。
+- **指纹识别线程数从 50 降为 3**：指纹匹配是纯 CPU 操作受 GIL 限制，3 线程足够覆盖 IO 间隙。剩余预算全给漏洞扫描 exp_consumer。
+- **前端按钮逻辑精简**：stop 状态去掉冗余的"启动"按钮，只留"续跑"和"重跑"。暂停中状态即时显示"暂停中..."标签。
+- **表单字段收口**：自动扫描和批量任务的 ModelForm 从 `exclude` 改为 `fields` 白名单，防止 `queued`/`failed`/`stop_requested` 等运行时字段泄露到前端。
+- **`cybersparker/settings.py` 全部配置变量加中文注释**：分组说明每个变量控制什么、影响哪些环节。
+- **批量任务 `check_stop_bridge` 同步改造**：和自动扫描一样改为 Redis 优先 + DB 每秒兜底。
+## 2026-05-16
+- **阶段二调度改造 backlog 拆分**：基于 Redis + Celery 全局任务调度计划，新增 11 个待确认 backlog，覆盖基线观测、Celery 基础设施、自动识别/批量任务投递迁移、Redis 全局资源预算、结果事件缓冲与 DB Writer、自动识别 async 请求层、并发治理、本地 spool 兜底和单任务去留审计。
+- **控制面同步**：`docs/项目控制台.md` 新增阶段二调度改造候选列表和依赖顺序建议；相关 02/03/06 模块文档新增阶段二候选能力地图。
+- **Mode H 高风险共识规划通过**：`BL-SCHED-001`、`BL-SCHED-002`、`BL-AUTO-002`、`BL-BATCH-007`、`BL-SCHED-005`、`BL-SCHED-006` 完成 Planner → Architect → Critic 共识循环，明确 DB/Redis 状态真源、终态 CAS、DB 连接预算硬闸门、auto/batch stop bridge、最小 spool 与结果幂等质量门。
+- **BL-SCHED-001 调度基线观测落地**：新增 `/runtime/diagnostics` 只读诊断入口与 `scheduler_runtime_service`，输出线程数、`dj_db_conn_pool` 连接池占用、任务句柄/队列长度、耗时、observe-only 资源配置、状态模型规划和 `EXPTask` 使用量统计，为 `BL-SCHED-002` / `BL-TASK-002` 提供基线证据。
+- **BL-SCHED-002 Celery 基础设施落地**：新增 `cybersparker/celery.py`、四标准队列、dispatch 硬闸门、worker 启动预算闸门、统一终态 CAS helper、本地 `redis + worker` 开发配置；`celery -A cybersparker worker` 在预算超限时会直接失败退出。
+- **BL-AUTO-002 自动识别任务迁移到 Celery**：`/Identify_task/operate` 启动路径改为写 DB 运行态并投递 `auto_scan` Celery task；自动识别执行器增加 `dispatch_token/owner` claim、最小 stop bridge（DB `stop_requested` + Redis stop signal）和终态 CAS 保护，请求线程不再直接起长生命周期扫描线程。
+- **BL-BATCH-007 批量任务迁移到 Celery**：`/batch_exploadTask/operate` 启动/续跑路径改为写 DB 运行态并投递 `batch_scan` Celery task；批量任务 worker 增加 `dispatch_token/owner` claim、最小 stop bridge 和终态 CAS 保护，请求线程不再直接起长生命周期线程或 gevent 子进程。
+- **BL-SCHED-005 Redis 资源令牌落地**：新增 `resource_lease_service`，为 auto/batch worker 引入 `running_*` 与 `threads/coroutines` 资源 lease、TTL 回收、heartbeat 续租和 `waiting_resource` 重试标记；在本地无 Redis时自动降级到 memory lease 以保证单测可跑。
+- **BL-SCHED-006/007 结果事件缓冲与 Spool 治理落地**：新增 `result_event_service` 与 `run_result_writer_task`，auto/batch 结果改为先写事件再由 writer 幂等入库；补齐 pending reclaim、spool fallback/replay、活动文件轮转、归档和巡检统计。
+- **BL-AUTO-003 自动识别 Web 请求 async 化**：`auto_exp_task.py` 的阻塞式 `requests.get()` 已切换为 aiohttp async fetcher；显式禁用系统代理继承（`trust_env=False`），接入 `http_inflight` lease、requests 兼容的 header 序列化，以及 bounded queue/backpressure。新增 async 回归测试覆盖代理禁用、lease 等待恢复、并发窗口、单线程调度与开启漏洞扫描时的后段队列收敛。后续 hardened：geoip2 模块级导入改为延迟绑定 + None 守卫、BS title 链式访问改为两步判空、新增 `pyrightconfig.json` 收口 Pyright venv 路径与 Django 动态模型噪声。
+- **BL-TASK-002 单任务去留审计**：审计 `EXPTask.taskType` Verify/Attact 两种模式、`cmd_input` 命令输入和前端/API/执行器依赖。结论：建议将 Attact 能力迁移到批量任务后归档单任务。
+- **阶段二调度改造全面验收通过**：11/11 backlog item 全部通过独立审计（opus 级 verifier）核查。73 条验收条件均有可复查的代码+测试证据。66 个测试覆盖 CAS 语义、Lua 资源 lease、三类结果去重、spool 轮转/回放、Celery dispatch/noop、async HTTP/trust_env、线程协程预算、stop bridge 和异常恢复。`python manage.py check` 0 issues。
+- **BL-BATCH-008 批量任务全局预算与结果事件治理**：`batch_task_executor.py` 新增 `_read_budget_from_leases()`，`_run_thread_mode()` 的 `consumer_exp` 线程数受全局 `threads` 预算约束，`_run_gevent_mode()` 的 greenlet 数受全局 `coroutines` 预算约束。新增 6 个测试覆盖线程/协程预算、fallback、事件发布与无界增长。
+- **BL-AUTO-004 自动识别指纹与漏洞验证并发治理**：`auto_exp_task.py` 指纹识别消费者线程数新增全局 `threads` 资源预算约束（`_read_thread_budget_from_leases()`），不再无条件使用 `thread_num`；漏洞验证消费者（`Vulnerability_scanning=1`）纳入 `thread_budget // 2` 子预算。新增 6 个测试覆盖预算读取、约束、fallback、背压保持、事件发布完整性及无界增长检查。
+## 2026-05-15
+- **产品存储重构**：`auto_scan_indentify_result.product` 从 `\n` 分隔的 `CharField(128)` 改为 PostgreSQL `ArrayField(CharField)` + GIN 索引。单个 target 可精确保存多个识别产品，搜索 `product:"nginx"` 使用 `products__contains` 精确匹配（GIN 索引加速），不再误匹配 `openresty-nginx`。同步更新所有模板中的产品渲染逻辑。
+- **HTML 内容精准检索**：启用 PostgreSQL `pg_trgm` 扩展 + GIN 索引（`idx_html_trgm`），`to_query_structure()` 新增 `html` 字段 `__icontains` 匹配。现可通过 `html:"keyword"` 搜索目标主机的 HTML 响应内容。
+- **数据库迁移至 PostgreSQL**（192.168.1.11:5432/cybersparker）：解决 SQLite 单 writer 并发瓶颈导致的 `database is locked` 问题。`settings.py` 密码硬编码 + 环境变量 `DB_PASSWORD`/`DB_HOST`/`DB_PORT` 覆盖。移除 `apps.py` 中 SQLite WAL PRAGMA 配置及全部无效 `import sqlite3` 死代码。
+- 清理 PG 迁移后的 SQLite 遗留 workaround：移除 `auto_exp_task.py` 中 `self._db_lock` 线程锁，`filter→exists→create` 替换为 `get_or_create()`（提供跨 handler 的重复插入防护）。
+- SQLite 历史数据迁移至 PostgreSQL（32553 条记录），`EXPTask_result.result` 和 `auto_scan_exp_result.result` 从 `CharField(1000)` 改为 `TextField` 以适应超长执行输出。
+- **数据库连接池**：引入 `django-db-connection-pool` 解决多线程任务并发时 PostgreSQL `too many clients` 问题（池大小 20 + 溢出 10 = 最多 30 个真实 PG 连接）。
+- **指纹识别 N+1 查询优化**：`fingerprint_indentify.py` 的 `Identifyner` 原本每处理一个目标 URL 就逐条 DB 查询 5897 个指纹（每目标 5897 次 SQL），改为 `__init__` 一次性加载全量 `(product, condition)` 到内存，`handle()` 纯内存匹配，彻底消除连接池争用。
+- **EXP 关联查询预加载**：`auto_exp_task.py` 的 `get_exp_ids_for_products` 原为三层嵌套 N+1 查询（每产品→查指纹→查关联），改为 `__init__` 时 `select_related` 一次加载全量指纹→EXP 映射缓存，`exp_consumer` 线程内纯内存查找。
+- **进度更新节流**：`single_task_executor.py` producer 原每读一行文件就 UPDATE 一次数据库（1 万行 = 1 万次 SQL），改为仅百分比变化时才写库（最多 100 次）。
+- **单任务结果写入优化**：`single_task_executor.py` `save_TaskResult` 从 `get`+`update`/`create`（2-3 次查询）简化为 `update_or_create`（1 次查询）。
+- **连接池泄漏修复**：单任务、批量任务、自动扫描任务的后台线程在入口调用 `close_old_connections()` 清理陈旧连接，并在每次 ORM 操作后用 `finally: connection.close()` 将连接归还 SQLAlchemy 连接池；同时新增 `MAX_EXPLOIT_THREAD_NUM` 表单/执行层上限，降低多任务并发时 `QueuePool timeout` 风险。
+- 修复自动扫描任务运行时 `sqlite3.OperationalError: database is locked`：Django SQLite 连接超时提升至 30s，handler 内写入串行化加锁避免多线程同时写库。
+- 修复自动扫描任务在未配置代理时自动使用系统环境变量（`HTTP_PROXY`/`HTTPS_PROXY`）中的代理：monkey patch 空代理时显式设 `http/https=None`，阻止 `requests` 库从环境变量注入代理。
+- **修复自动扫描任务完成后前端仍显示 running**：`Auto_exploit_Task_handler.run()` 原启动子线程后立即返回，producer EOF break 前状态更新代码从未执行。现 `run()` 等待 producer 线程完成并保证退出前设置 `status=1`/`process=100%`。`auto_scan_tasks` 新增 `process` 字段支持进度持久化。
+- **修复批量任务输入文件含空行时完成后前端仍显示 running**：`_finalize_run` 原仅靠 `get_progress()` 更新状态，但空行导致 `completed_count < total_line_count` 进度永远达不到 100%。新增兜底强制写入 `status=1`。
+- **自动扫描任务前端新增进度条**：列表页新增 process 列，运行中任务每 3s 轮询 `/Identify_task/all_info` 更新进度条和状态。
+- **修复自动扫描任务停止时的 KeyError**：`KILL_AUTO_TASK_DIC` 访问从 `dict[uid]` 改为 `dict.get(uid)`，并在启动线程前插入占位符消除时序竞争。`startTask` 正常完成后额外兜底写 `status=1`。
+- **自动扫描识别结果独立页面 + 美化**：新增 `/Identify_task/<id>/result/standalone` 路由，独立模板不受后台侧边栏限制。v2 "Warm Laboratory" 重设计：暖灰底+Spectral衬线字体+青色强调色，结果改为可展开行列表（去繁边框），左侧新增漏洞统计面板（按 CVE 聚合命中数+受影响主机数），搜索维度折叠面板。
+## 2026-05-14
+- 修复自动识别任务指纹匹配运行时错误：`check()` 原先使用 Windows 路径的 raw sqlite3 连接在 Linux 上无法打开数据库文件，改为 Django ORM 查询；同时增加空键防御性跳过，避免 `NoneType not iterable` 崩溃。
+- 新增批量任务编辑时空间测绘引擎数据复用控制：编辑 input_type=4 任务时，若查询语句未变化且上次成功获取了数据，可选择"否，复用已有数据"跳过重新调用引擎 API；条件不满足时选项置灰并强制重新获取。
+- 新增批量任务续跑功能：列表页为已停止且有进度的任务显示"续跑"按钮，点击后从上次中断位置继续执行，不再从头开始。
+- 修复批量任务暂停后切换运行模式重启卡住：前端启动/停止确认按钮不再重复绑定旧操作，后端停止任务时统一写合法 `stop(3)` 状态并清理运行句柄。
+- 修复批量任务协程运行 Nuclei YAML 多请求模板耗时叠加：单个 HTTP 请求超时/连接异常后立即终止当前目标后续请求，避免同一目标继续串行等待多个 10s；默认 10s 仍保持为单请求超时。
+- 修复批量任务协程模式 HTTPS 请求退化风险：协程子进程改为轻量 gevent runner 入口，先执行 gevent socket/SSL patch，再导入 Django/requests/执行器；同时保留项目请求运行时的禁用证书校验配置。
+- 优化批量任务进度落库策略：进度以内存完成数为真源，数据库只在百分比变化、短时间窗口到期或终态兜底时更新，减少 SQLite/WAL 写压力。
+- 修复批量任务协程运行 nuclei yaml 时进度长时间不动后跳变：进度改为按完成目标数推进，并在每个目标处理完成后写回后端进度。
+- 修复批量任务协程模式下 Nuclei YAML 通过代理发起 HTTPS 请求可能触发 `ssl.SSLContext.minimum_version` 递归的问题：gevent monkey patch 现在通过子进程轻量入口提前执行 SSL patch，避免破坏 urllib3 的 TLS context 创建且不退化 HTTPS 协作式并发。
+## 2026-05-13
+- 修复批量任务成果页面检索不绑定当前任务：`/batch_exploadTask/<uid>/result` 不输入检索条件时点击搜索按钮，现默认绑定当前任务 ID，不再展示所有任务的成果。
+- 修复批量任务执行中列表页刷新阻塞 7-8 秒：SQLite 启用 WAL 模式（并发读写）+ 页面移除 `async: false` 同步 AJAX 调用。
+- 修复批量任务启动时空间测绘引擎数据获取阻塞前端响应：`prepare_engine_target_before_start()` 从 HTTP 请求路径移入后台线程执行。
+- 修复批量任务执行过程中进度条长时间为 0% 的问题（第二轮）：根因是 `get_progress()` 使用 `consumer_number`（仅在 exploit 完成后递增，慢）计算进度，改用 `max(consumer_number, current_index)` 使进度反映 producer 读行速度（快），进度条可即时响应。
+- 新增批量任务历史空间测绘结果复用：`input_type=5`，创建任务时可从以往测绘引擎查询结果中选择目标文件，支持多选合并去重。
+- 新增插件列表批量删除功能：`/expload/list` 页面支持勾选多项后批量删除，复用已有复选框和确认弹窗。
+- 修复批量任务 Python POC 结果无法入库：`_build_exp_cache` 异常分支静默吞掉 POC 加载失败，加入 `traceback.print_exc()` 使错误可见；修复测试 POC 文件 tab/space 混用缩进。
+- 修复 POC 代码编辑器 Tab 键行为：`exp_debug.html` 两个 CodeMirror 实例（tips 编辑器 + 主编辑器）统一配置 `indentWithTabs: false`，并在 `extraKeys` 中显式绑定 Tab 键插入 4 空格，从代码层面杜绝 tab/space 混用。
+- 补充项目控制面开发文档：项目控制台、需求规格、阶段交付范围、实现总览、6 个模块设计文档、7 个 backlog 文件。
+- 阶段一验收审计完成：12 个 backlog item 全部实现，代码/文档契约一致性通过，可证伪性达标 92%。
+## 2026-04-25
+- 新增 Nuclei YAML 运行时支持：`plugin_language=nuclei_yaml` 插件可经由 `poc_runtime_resolver` 统一解析和执行。
+- 新增迁移 `0005_exp_plugin_language_nuclei_yaml.py`。
+- 新增请求运行时 Monkey Patch 机制：7 个 patch 模块全局生效（SSL/代理/Header/URL 编码/HTTP Raw 记录）。
+## 2026-04-22
+- 批量任务新增网络空间测绘输入源（`input_type=4`）：支持 fofa/zoomeye/quake/hunter/shodan 5 个引擎。
+- 新增 `CyberspaceEngineSetting` 模型和 CRUD。
+- 批量任务支持 `input_type=2`（历史漏洞资产）和 `input_type=3`（历史上传文件）。
+- 新增 `engine_proxy_mode` 和 `engine_proxy` 字段控制测绘请求代理行为。
+## 2026-04-20
+- 批量任务新增 `run_mode`（线程/协程）配置，模型字段：`batch_EXPTask.run_mode`。
+- 新增迁移：`0001_initial.py`、`0002_batch_exptask_run_mode.py`。
+- 批量任务启动链路支持按 `run_mode` 分流：线程模式或 `spawn` 子进程协程模式。
+- 新增 `ProcessTaskKiller`，保持停止任务入口统一可用。
+- 修复批量启动只处理第一个任务 ID 的问题，改为循环处理并汇总返回。
+- 修复 `EXP` 解析空值导致 `id__in=['']` 报错问题。
+- 在子进程执行器中补齐 Django 初始化顺序：先 `django.setup()` 再导入 `models`。
+- 依赖新增 `gevent`。

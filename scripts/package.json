@@ -1,0 +1,8 @@
+{
+  "name": "ai-poc-crawler",
+  "private": true,
+  "dependencies": {
+    "puppeteer": "^22.0.0",
+    "turndown": "^7.2.0"
+  }
+}

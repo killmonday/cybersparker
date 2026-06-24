@@ -1,0 +1,2 @@
+class RequestRuntimeIncompleteRead(Exception):
+    pass

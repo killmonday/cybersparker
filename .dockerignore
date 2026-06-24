@@ -1,0 +1,64 @@
+# ============================================================
+# Docker build context — 排除一切不需要进入镜像的文件
+# ============================================================
+
+# Python 编译产物
+__pycache__/
+*.py[codz]
+*$py.class
+*.pyo
+.mypy_cache/
+
+# 前端 / 脚本依赖（Dockerfile 内单独 RUN npm install）
+node_modules/
+scripts/node_modules/
+frontend/node_modules/
+
+# Git
+.git/
+.gitattributes
+.gitignore
+
+# Docker
+.dockerignore
+docker-compose.yml
+Dockerfile
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 运行时数据（通过 bind mount 挂载，不进镜像）
+pgdata/
+redis_data/
+error_log/
+result_spool/
+EXP_input/
+upload_files/
+AI_PoC/
+shuffle_files/
+
+# CI / OMC / 工具链
+.claude/
+.omc/
+.serena/
+.agents/
+.gitnexus/
+ccr.config.example.json
+
+# 测试与临时文件
+test-ai2poc/
+*.db
+*.sqlite3
+exp.db
+
+# 文档与计划（不进镜像）
+plans/
+docs/
+*.md
+!requirements.txt
+
+# 注意：scripts/package-lock.json 不排除 — Dockerfile 需要它做可复现构建

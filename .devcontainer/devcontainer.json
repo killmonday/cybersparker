@@ -1,0 +1,18 @@
+{
+  "name": "cybersparker-dev",
+  "image": "go-python-node-dev:v1",
+  // "build": {
+  //   "dockerfile": "Dockerfile"
+  // },
+  "postCreateCommand": "python --version && go version && node --version && npm --version",
+  "settings": {
+    "python.pythonPath": "/opt/venv/bin/python",
+    "go.useLanguageServer": true
+  },
+  "extensions": [
+    "golang.go",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "dbaeumer.vscode-eslint"
+  ]
+}

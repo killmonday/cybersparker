@@ -1,0 +1,1195 @@
+@import url('/fonts/fonts.css');
+
+/* ============================================================
+   Design Tokens — Light Theme
+   ============================================================ */
+:root {
+  /* Brand — muted periwinkle */
+  --brand: #a0aae0;
+  --brand-hover: #7e8cc4;
+  --brand-subtle: #f3f4fd;
+  --brand-subtle-border: #dde0f5;
+  --brand-ring: rgba(160, 170, 224, 0.15);
+
+  /* Gray scale — cool, modern neutrals */
+  --gray-50: #f8f9fa;
+  --gray-100: #f1f3f5;
+  --gray-200: #e9ecef;
+  --gray-300: #dee2e6;
+  --gray-400: #adb5bd;
+  --gray-500: #6c757d;
+  --gray-600: #495057;
+  --gray-700: #343a40;
+  --gray-800: #212529;
+  --gray-900: #0d1117;
+
+  /* Semantic */
+  --success: #00a86b;
+  --success-bg: #e6f9f1;
+  --success-border: #b3e8d1;
+  --warning: #e67e22;
+  --warning-bg: #fff8f0;
+  --warning-border: #fce0c0;
+  --danger: #e74c3c;
+  --danger-bg: #fef0ef;
+  --danger-border: #fbc4c0;
+  --info: #6c5ce7;
+  --info-bg: #f2f0ff;
+  --info-border: #d5d0fa;
+
+  /* Surfaces */
+  --bg-deep: var(--gray-100);
+  --bg-surface: #ffffff;
+  --bg-elevated: var(--gray-50);
+  --bg-hover: var(--gray-100);
+
+  /* Borders */
+  --border: var(--gray-200);
+  --border-focus: var(--brand);
+
+  /* Text */
+  --text: var(--gray-800);
+  --text-dim: var(--gray-500);
+  --text-muted: var(--gray-400);
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  /* Shadows — 4-level nuanced hierarchy */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05), 0 1px 4px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-xl: 0 20px 48px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+
+  /* Typography scale */
+  --fs-h1: 24px;
+  --fs-h2: 18px;
+  --fs-h3: 15px;
+  --fs-body: 14px;
+  --fs-caption: 12px;
+
+  --lh-h1: 1.3;
+  --lh-h2: 1.35;
+  --lh-h3: 1.4;
+  --lh-body: 1.55;
+  --lh-caption: 1.45;
+
+  --fw-bold: 700;
+  --fw-semibold: 600;
+  --fw-medium: 500;
+  --fw-regular: 400;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+
+  /* Layout */
+  --content-max: 1280px;
+  --sidebar-width: 220px;
+  --sidebar-collapsed: 64px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Fonts */
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+}
+
+/* ============================================================
+   Design Tokens — Dark Theme
+   ============================================================ */
+[data-theme="dark"] {
+  --brand: #4d7cff;
+  --brand-hover: #6b93ff;
+  --brand-subtle: #151d3d;
+  --brand-subtle-border: #1e3478;
+  --brand-ring: rgba(77, 124, 255, 0.2);
+
+  --gray-50: #0d1117;
+  --gray-100: #161b22;
+  --gray-200: #21262d;
+  --gray-300: #30363d;
+  --gray-400: #484f58;
+  --gray-500: #8b949e;
+  --gray-600: #b1bac4;
+  --gray-700: #c9d1d9;
+  --gray-800: #e6edf3;
+  --gray-900: #f0f6fc;
+
+  --success: #3dd68c;
+  --success-bg: #0d3320;
+  --success-border: #1a5c3a;
+  --warning: #f0a04b;
+  --warning-bg: #362010;
+  --warning-border: #6b3e1a;
+  --danger: #f2555a;
+  --danger-bg: #3d1215;
+  --danger-border: #7a2626;
+  --info: #9b8eff;
+  --info-bg: #19163d;
+  --info-border: #3d2f7a;
+
+  --bg-deep: var(--gray-50);
+  --bg-surface: var(--gray-100);
+  --bg-elevated: var(--gray-200);
+  --bg-hover: var(--gray-200);
+
+  --border: var(--gray-300);
+  --border-focus: var(--brand);
+
+  --text: var(--gray-800);
+  --text-dim: var(--gray-500);
+  --text-muted: var(--gray-400);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-xl: 0 20px 48px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* ============================================================
+   Base Reset
+   ============================================================ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--transition-slow), color var(--transition-slow);
+}
+
+/* Subtle noise texture overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ============================================================
+   Typography
+   ============================================================ */
+h1, .h1 {
+  margin: 0;
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-h1);
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+h2, .h2 {
+  margin: 0;
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-h2);
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+h3, .h3 {
+  margin: 0;
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-h3);
+  color: var(--text);
+}
+
+/* ============================================================
+   Page Shell
+   ============================================================ */
+.react-shell-page {
+  padding: var(--space-4) var(--space-5);
+  animation: pageEnter 300ms ease-out;
+}
+
+/* 强制 antd Tabs 内容区占满容器宽度。
+   antd 6.x 的 tab pane 默认 flex: none，宽度由内容决定；
+   首个 tab 内容短（如 302 跳转仅有几行响应头）时 grid 被挤压到 ~1cm。
+   改为 flex: 1 让活跃 tab pane 自动填满 content 区剩余空间。 */
+.react-shell-page .ant-tabs { width: 100%; }
+.react-shell-page .ant-tabs-content-holder { flex: 1 !important; min-width: 0 !important; }
+.react-shell-page .ant-tabs-content { display: flex !important; width: 100% !important; }
+.react-shell-page .ant-tabs-tabpane-active { flex: 1 !important; }
+
+/* 重置 antd Select 从 body 继承的 line-height（--lh-body: 1.55），
+   防止文字在固定高度容器内偏上被裁切。
+   antd 6.x 选中值渲染在 .ant-select-content 直接文本节点中，
+   搜索 input 绝对定位避免开关下拉时的 flex 布局偏移 */
+.react-shell-page .ant-select-content {
+  line-height: 1.35 !important;
+  align-items: center !important;
+  overflow: visible !important;
+}
+
+.react-shell-page .ant-select-content::before {
+  line-height: 1.35 !important;
+}
+
+.react-shell-page .ant-select-input {
+  position: absolute !important;
+  inset: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.react-shell-card {
+  transition: background var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.react-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-normal), border-color var(--transition-normal);
+}
+
+.react-section:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.react-list-card {
+  overflow-x: auto;
+}
+
+.react-shell-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--brand-subtle), rgba(51, 102, 255, 0.04));
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: var(--fw-semibold);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--brand-subtle-border);
+}
+
+.react-shell-card h2 {
+  margin: 0 0 4px;
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-bold);
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.react-shell-card p {
+  margin: 0 0 18px;
+  line-height: var(--lh-body);
+  color: var(--text-dim);
+  font-size: var(--fs-caption);
+}
+
+/* ============================================================
+   List Header
+   ============================================================ */
+.react-list-header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: flex-start;
+  margin-bottom: var(--space-3);
+}
+
+/* ============================================================
+   Links & Buttons (base)
+   ============================================================ */
+.react-link-button,
+.react-inline-link {
+  color: var(--brand);
+  text-decoration: none;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.react-link-button:hover,
+.react-inline-link:hover {
+  color: var(--brand-hover);
+}
+
+.react-link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  background: var(--brand-subtle);
+  border: 1px solid var(--brand-subtle-border);
+  font-size: var(--fs-caption);
+  transition: all var(--transition-fast);
+}
+
+.react-link-button:hover {
+  background: #e2e7ff;
+  border-color: var(--brand);
+}
+
+/* ============================================================
+   Filter Bar
+   ============================================================ */
+.react-filter-bar {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.react-filter-bar-simple {
+  grid-template-columns: 1fr auto;
+}
+
+.react-filter-bar input,
+.react-filter-bar select {
+  height: 36px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  font-size: var(--fs-caption);
+  color: var(--text);
+  font-family: var(--font-sans);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.react-filter-bar input:focus,
+.react-filter-bar select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+
+.react-filter-bar button {
+  height: 36px;
+  padding: 0 20px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--brand);
+  color: #fff;
+  font-weight: var(--fw-semibold);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.react-filter-bar button:hover {
+  background: var(--brand-hover);
+  box-shadow: 0 2px 8px rgba(51, 102, 255, 0.3);
+}
+
+.react-filter-bar button:active {
+  transform: scale(0.98);
+}
+
+/* ============================================================
+   Table
+   ============================================================ */
+.react-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  font-size: var(--fs-caption);
+}
+
+.react-table th,
+.react-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 10px var(--space-3);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.react-table th {
+  background: var(--bg-elevated);
+  font-weight: var(--fw-semibold);
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.react-table tbody tr {
+  transition: background var(--transition-fast);
+  background: var(--bg-surface);
+}
+
+.react-table tbody tr:hover {
+  background: #f5f7ff;
+}
+
+.react-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ============================================================
+   Pagination
+   ============================================================ */
+.react-pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-3);
+  font-size: var(--fs-caption);
+  color: var(--text-dim);
+}
+
+.react-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.react-pagination-actions button {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  transition: all var(--transition-fast);
+}
+
+.react-pagination-actions button:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--brand-subtle);
+}
+
+.react-pagination-actions button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   Form Card
+   ============================================================ */
+.react-form-card {
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-normal), border-color var(--transition-normal);
+}
+
+.react-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+
+.react-form-header strong {
+  color: var(--brand);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-body);
+}
+
+.react-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.react-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  color: var(--text-dim);
+}
+
+.react-form-grid input,
+.react-form-grid select {
+  height: 40px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 12px;
+  font-size: var(--fs-body);
+  font-family: var(--font-sans);
+  color: var(--text);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.react-form-grid input:focus,
+.react-form-grid select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+
+/* antd 6.x 无 .ant-select-selector，根元素 .ant-select 即是选择框 */
+.react-form-grid .ant-select {
+  height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding-block: 0 !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: none !important;
+}
+
+.react-form-grid .ant-select-content {
+  display: flex !important;
+  align-items: center !important;
+  line-height: 1.35 !important;
+  overflow: visible !important;
+}
+
+/* 内容区的 ::before strut 统一下行高 */
+.react-form-grid .ant-select-content::before {
+  line-height: 1.35 !important;
+}
+
+/* 搜索 input 绝对定位覆盖，不参与 flex 布局，避免开关下拉时的偏移 */
+.react-form-grid .ant-select-input {
+  position: absolute !important;
+  inset: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.react-form-grid .ant-select-focused,
+.react-form-grid .ant-select-open {
+  border-color: var(--border-focus) !important;
+}
+
+.react-form-grid .ant-select-sm.ant-select,
+.react-form-grid .ant-select-sm .ant-select-content {
+  height: auto !important;
+  min-height: 32px !important;
+}
+
+.react-form-grid .ant-select-sm .ant-select-content {
+  line-height: 1.35 !important;
+  align-items: center !important;
+}
+
+.react-form-actions {
+  margin-top: var(--space-4);
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.react-primary-button,
+.react-secondary-button,
+.react-inline-button {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-sans);
+  transition: all var(--transition-fast);
+  background: var(--bg-surface);
+  color: var(--text);
+}
+
+.react-primary-button {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+  font-weight: var(--fw-semibold);
+  box-shadow: 0 1px 3px rgba(51, 102, 255, 0.2);
+}
+
+.react-primary-button:hover {
+  background: var(--brand-hover);
+  box-shadow: 0 2px 8px rgba(51, 102, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+.react-primary-button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(51, 102, 255, 0.15);
+}
+
+.react-secondary-button:hover,
+.react-inline-button:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--brand-subtle);
+}
+
+/* ============================================================
+   Error
+   ============================================================ */
+.react-error-text {
+  color: var(--danger);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+}
+
+.react-error-box {
+  margin-top: var(--space-2);
+  color: #b91c1c;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+}
+
+/* ============================================================
+   Status Labels
+   ============================================================ */
+.react-status-label {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.react-status-label.status-finish {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.react-status-label.status-running {
+  background: var(--brand-subtle);
+  color: var(--brand);
+}
+
+.react-status-label.status-waiting,
+.react-status-label.status-paused {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.react-status-label.status-pausing {
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.react-status-label.status-stopped {
+  background: var(--gray-100);
+  color: var(--text-dim);
+}
+
+.react-status-label.status-unstarted {
+  background: var(--gray-100);
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   Progress Bar
+   ============================================================ */
+.react-progress-wrap {
+  width: 80px;
+  height: 6px;
+  background: var(--gray-200);
+  border-radius: 3px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.react-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brand), #5b8cff);
+  border-radius: 3px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.react-progress-text {
+  font-size: var(--fs-caption);
+  color: var(--text-dim);
+  margin-left: 6px;
+  vertical-align: middle;
+  font-family: var(--font-mono);
+}
+
+/* ============================================================
+   Action Buttons
+   ============================================================ */
+.react-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.react-task-table-wrap {
+  overflow-x: auto;
+}
+
+/* Prevent table columns from collapsing when the page is zoomed in.
+   Let the table grow to its natural content width while staying at least
+   as wide as the wrapper. Narrow column values won't wrap character by
+   character — the table scrolls horizontally instead. */
+.react-task-table-wrap .ant-table table {
+  width: auto;
+  min-width: 100%;
+}
+
+/* ============================================================
+   Result Page
+   ============================================================ */
+.react-result-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.react-result-sidebar-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-normal);
+}
+
+.react-result-sidebar-card select {
+  height: 38px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 12px;
+  color: var(--text);
+  font-size: var(--fs-caption);
+  font-family: var(--font-sans);
+}
+
+.react-facet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.react-facet-list li {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  font-size: var(--fs-caption);
+  overflow: hidden;
+  transition: all var(--transition-fast);
+}
+
+.react-facet-list li:hover {
+  border-color: var(--brand);
+  box-shadow: 0 1px 4px rgba(51, 102, 255, 0.1);
+}
+
+.react-facet-button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  font-family: var(--font-sans);
+  transition: background var(--transition-fast);
+}
+
+.react-facet-button:hover {
+  background: var(--brand-subtle);
+}
+
+.react-facet-button strong {
+  color: var(--brand);
+}
+
+.react-result-summary {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-caption);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.react-inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.react-inline-select select {
+  height: 34px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  color: var(--text);
+  font-size: var(--fs-caption);
+  font-family: var(--font-sans);
+}
+
+.react-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.react-result-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-surface);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.react-result-item:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--gray-300);
+}
+
+.react-result-toggle {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: var(--space-3);
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-family: var(--font-sans);
+}
+
+.react-result-headline,
+.react-result-subline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.react-result-headline {
+  margin-bottom: 6px;
+}
+
+.react-result-subline {
+  color: var(--text-dim);
+  font-size: var(--fs-caption);
+}
+
+.react-result-detail {
+  border-top: 1px solid var(--border);
+  padding: var(--space-3);
+  background: var(--bg-elevated);
+}
+
+.react-result-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-caption);
+}
+
+.react-result-vulns ul {
+  margin: var(--space-2) 0 0;
+  padding-left: 18px;
+}
+
+.react-result-actions-row {
+  margin-bottom: var(--space-2);
+}
+
+.react-result-port-overview {
+  margin-bottom: var(--space-2);
+}
+
+.react-port-overview-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.react-port-overview-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--fs-caption);
+  background: var(--bg-surface);
+  transition: border-color var(--transition-fast);
+}
+
+.react-port-overview-row.is-current {
+  border-color: var(--brand);
+  background: var(--brand-subtle);
+}
+
+.react-port-proto {
+  font-weight: var(--fw-semibold);
+  color: var(--brand);
+}
+
+.react-port-port {
+  color: var(--text-dim);
+}
+
+.react-port-target {
+  flex: 1;
+  word-break: break-all;
+}
+
+.react-port-products {
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   Modal
+   ============================================================ */
+.react-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 17, 23, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn var(--transition-slow);
+}
+
+.react-modal-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  max-width: 720px;
+  width: 92%;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-xl);
+  animation: modalIn 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.react-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  font-weight: var(--fw-semibold);
+}
+
+.react-modal-body {
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+}
+
+.react-modal-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--fs-caption);
+  line-height: 1.6;
+  background: var(--bg-elevated);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+}
+
+/* ============================================================
+   Code / Panel
+   ============================================================ */
+.react-shell-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text);
+  line-height: 1.7;
+}
+
+.react-shell-panel pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ============================================================
+   Keyframes
+   ============================================================ */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.95) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   Ant Design Overrides
+   ============================================================ */
+.ant-layout-sider {
+  background: var(--bg-surface) !important;
+  border-right: 1px solid var(--border) !important;
+}
+
+.ant-layout-sider .ant-menu {
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ant-layout-sider .ant-menu-item {
+  margin: 0 8px !important;
+  border-radius: var(--radius) !important;
+  font-family: var(--font-sans) !important;
+  color: var(--text-dim) !important;
+}
+
+.ant-layout-sider .ant-menu-item-selected {
+  background: var(--brand-subtle) !important;
+  color: var(--brand) !important;
+  font-weight: var(--fw-semibold) !important;
+}
+
+.ant-layout-sider .ant-menu-submenu-title {
+  font-family: var(--font-sans) !important;
+  font-weight: var(--fw-semibold) !important;
+  color: var(--text) !important;
+}
+
+.ant-layout-sider-trigger {
+  background: var(--bg-elevated) !important;
+  color: var(--text-dim) !important;
+  border-top: 1px solid var(--border) !important;
+}
+
+/* Refine table headers */
+.ant-table-thead > tr > th {
+  background: var(--bg-elevated) !important;
+  font-weight: var(--fw-semibold) !important;
+  font-size: 11px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+/* Refine card appearance */
+.ant-card {
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-normal);
+}
+
+.ant-card:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+/* Primary button refinement */
+.ant-btn-primary {
+  box-shadow: 0 1px 3px rgba(51, 102, 255, 0.2) !important;
+}
+
+.ant-btn-primary:hover {
+  box-shadow: 0 2px 8px rgba(51, 102, 255, 0.35) !important;
+}
+
+/* Hide search input in no-search multi-select */
+.react-no-search-multi-select .ant-select-selection-search {
+  display: none !important;
+}
+
+/* CodeMirror container width constraint */
+.cm-editor {
+  max-width: 100%;
+}
+
+/* Debug result color: inherit from parent for matched/failed states */
+.result-matched .cm-content,
+.result-matched .cm-gutters {
+  color: #16a34a !important;
+}
+.result-not-matched .cm-content,
+.result-not-matched .cm-gutters {
+  color: #dc2626 !important;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 900px) {
+  .react-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .react-result-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .react-result-headline,
+  .react-result-subline,
+  .react-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .react-filter-bar {
+    grid-template-columns: 1fr;
+  }
+}

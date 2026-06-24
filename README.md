@@ -25,7 +25,7 @@
 - 🔎**内网资产测绘**
 
   - 支持配置多个代理服务（http/socks5），所有任务都可以配置代理，通过代理可探测目标内网
-  - 支持导入fscanx的输出文件，直接入库可查询。[fscanx](https://github.com/killmonday/fscanx) （https://github.com/killmonday/fscanx）具备协议、产品识别的能力，公网/内网都可以探测
+  - 支持导入fscanx的输出文件，直接入库可查询。 [fscanx](https://github.com/killmonday/fscanx) （ https://github.com/killmonday/fscanx ）具备协议、产品识别的能力，公网/内网都可以探测
   - 支持检索fscanx扫描出的多种协议弱口令、MS17010漏洞、OS版本信息、rdp信息、netbios网卡信息、smb/ftp文件清单等
   - 支持资产展示、聚类统计，友好的检索语法
 

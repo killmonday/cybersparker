@@ -1,9 +1,6 @@
 static_data
 static
 error_log
-EXP_input
-upload_files
-/AI_PoC/
 scripts/node_modules/
 scripts/package-lock.json
 test-ai2poc/
@@ -11,14 +8,12 @@ test-ai2poc/
 run_claude.sh
 ccr.config.example.json
 pocsuite3/**
-EXP_plugins
 graphify-out
 dist
 dump.rdb
 dist/**
 .omc
 exp.db
-EXP_plugin
 qqwry.dat
 app_cybersparker/static/favicons/
 app_cybersparker/static/favicons/*.ico

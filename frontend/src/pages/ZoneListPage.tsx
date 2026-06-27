@@ -5,8 +5,8 @@ import { get, post, put, del, timeNoSec } from '../api'
 import type { ZoneItem, ZoneListResponse } from '../types/zone'
 import { useAuth } from '../contexts/AuthContext'
 
-const ZONE_BASE = '/api/v1/zones'
-const ZONE_LIST_API = `${ZONE_BASE}?counts=1`
+const ZONE_API = '/api/v1/zones'
+const ZONE_LIST_API = `${ZONE_API}?counts=1`
 
 interface ZoneFormState {
   id?: number
@@ -72,7 +72,7 @@ export default function ZoneListPage() {
     setSubmitting(true)
     setFormErrors({})
     try {
-      await post(`${ZONE_BASE}/create`, {
+      await post(`${ZONE_API}/create`, {
         code: form.code,
         name: form.name,
         description: form.description,
@@ -99,7 +99,7 @@ export default function ZoneListPage() {
   const submitRename = async () => {
     setSubmitting(true)
     try {
-      await put(`${ZONE_BASE}/${renameModal.id}/update`, { name: renameModal.name })
+      await put(`${ZONE_API}/${renameModal.id}/update`, { name: renameModal.name })
       if (mountedRef.current) {
         message.success('改名成功')
         setRenameModal({ open: false, id: 0, name: '' })
@@ -125,7 +125,7 @@ export default function ZoneListPage() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          await del<{ status?: boolean; tips?: string; refs?: any[] }>(`${ZONE_BASE}/${zone.id}/delete`)
+          await del<{ status?: boolean; tips?: string; refs?: any[] }>(`${ZONE_API}/${zone.id}/delete`)
           if (mountedRef.current) {
             message.success('已删除')
             await load()

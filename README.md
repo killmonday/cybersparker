@@ -18,8 +18,6 @@
 
 [bug解决日志.md](./docs/bug解决.md)  
 
-- 2026.06.26，已上传poc目录和文件，请重新拉取仓库，否则docker构建失败
-
 ![image-20260624135121197](README.assets/image-20260624135121197.png)
 
 ![image-20260624135859361](README.assets/image-20260624135859361.png)
